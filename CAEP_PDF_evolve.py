@@ -16,8 +16,9 @@ setup_text_plots(fontsize=15, usetex=True)
 
 class CAEP:
 	def __init__(self, epsilon, xmin, xmax):
+		self.sinusoid = False
 		# physical parameters 
-		self.tfinal  = 5e-6   
+		self.tfinal  = 1e-6   
 		self.scaling = 1e-3            
 		self.xmin    = xmin                                      # A/mm^2
 		self.xmax    = xmax                                      # A/mm^2
@@ -39,11 +40,11 @@ class CAEP:
 		self.epsilon = epsilon                          # correlation between alpha and gamma \in [-1, 1]
 
 		# initialize the t Student PDF parameters
-		self.u0      = self.sigma_e*self.E0
-		self.nu      =  0.5 + self.gamma_b/self.gamma_p**2
-		self.lamda   = -self.epsilon*self.alpha_p*self.u0/self.gamma_p
-		self.cc      = (self.epsilon*self.alpha_p*self.gamma_b - self.gamma_p*self.alpha_b)/(self.alpha_p*self.gamma_p**2*np.sqrt(1 - self.epsilon**2))
-		self.aa      =  self.alpha_p*self.u0*np.sqrt(1 - self.epsilon**2)/self.gamma_p
+		self.u0        = self.sigma_e*self.get_pulse(0)
+		self.nu        =  0.5 + self.gamma_b/self.gamma_p**2
+		self.lamda     = -self.epsilon*self.alpha_p*self.u0/self.gamma_p
+		self.cc        = (self.epsilon*self.alpha_p*self.gamma_b - self.gamma_p*self.alpha_b)/(self.alpha_p*self.gamma_p**2*np.sqrt(1 - self.epsilon**2))
+		self.aa        =  self.alpha_p*self.u0*np.sqrt(1 - self.epsilon**2)/self.gamma_p
 		self.lam_store = [] #[self.lamda]
 		self.aa_store  = [] #[self.aa]
 		self.nu_store  = [] #[self.nu]
@@ -71,10 +72,15 @@ class CAEP:
 
 
 	def get_pulse(self, t):
-		return self.E0
+		if self.sinusoid: 
+			return self.E0*(1 + 0.1*np.cos(np.pi*t/0.2e-6))
+		else:
+			return self.E0*(np.exp(-t/0.2e-6))
+
+
 
 	def calculate_p_bar(self):
-		p_bar_at_t = np.sum(self.x*self.W )*(self.x[1]-self.x[0])
+		p_bar_at_t = np.sum(self.x*self.W)*(self.x[1]-self.x[0])
 		return p_bar_at_t
 
 	def get_u(self, tnow):
@@ -113,7 +119,7 @@ class CAEP:
 
 	def Solve(self):
 		y0 = [self.mu_ini, self.sigma2_ini]
-		self.sol = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='BDF')
+		self.sol = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA')
 		self.times = self.sol.t
 		self.mus     = self.sol.y[0]
 		self.sigma2s = self.sol.y[1]
@@ -125,6 +131,7 @@ class CAEP:
 		plt.show()
 		plt.ion()
 		plt.figure(figsize=(7,7))
+		counter = 0
 		for tt, mu, s2 in zip(self.times, self.mus, self.sigma2s):
 			self.update_params(tt, mu, s2)
 			self.lam_store.append(self.lamda)
@@ -133,26 +140,30 @@ class CAEP:
 			self.cc_store.append(self.cc)
 			plt.plot(-self.x, self.W, color='k', linewidth=2)
 			plt.xlim([self.xmin, self.xmax])
+			plt.ylim([0, 5])
 			plt.ylabel(r'$\rm W_s(p_z)$', fontsize=25)
 			plt.xlabel(r'$\rm -p_z\ [A/mm^2]$', fontsize=25)
 			plt.legend(fontsize=20, loc=2, frameon=False)
 			plt.tight_layout()
 			plt.draw()
+			#plt.savefig("./movie/snap_"+str(counter).zfill(4)+".png")
 			plt.pause(.001)
 			plt.clf()
+			counter += 1
+		plt.close()
 		plt.figure(figsize=(7,7))
 		plt.plot(1e6*self.times, self.aa_store, label=r'$\rm a$')
 		plt.plot(1e6*self.times, self.nu_store, label=r'$\rm \nu$')
 		plt.plot(1e6*self.times, self.cc_store, label=r'$\rm c$')
 		plt.plot(1e6*self.times, self.lam_store, label=r'$\rm \lambda$')
-		plt.ylim([-1,8])
+		plt.ylim([-1,10])
 		plt.xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
-		plt.legend(frameon=False, fontsize=15)
+		plt.legend(frameon=False, fontsize=20)
 		plt.tight_layout()
 		plt.show()
 
 
-SEP = CAEP(0.8, -2, 2)
+SEP = CAEP(0.8, -3, 3)
 pdb.set_trace()
 
 
