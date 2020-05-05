@@ -16,7 +16,7 @@ setup_text_plots(fontsize=15, usetex=True)
 
 class CAEP:
 	def __init__(self, epsilon, xmin, xmax):
-		self.sinusoid = False
+		self.test    = 3
 		# physical parameters 
 		self.tfinal  = 1e-6   
 		self.scaling = 1e-3            
@@ -40,7 +40,7 @@ class CAEP:
 		self.epsilon = epsilon                          # correlation between alpha and gamma \in [-1, 1]
 
 		# initialize the t Student PDF parameters
-		self.u0        = self.sigma_e*self.get_pulse(0)
+		self.u0        =  self.sigma_e*self.get_pulse(0)
 		self.nu        =  0.5 + self.gamma_b/self.gamma_p**2
 		self.lamda     = -self.epsilon*self.alpha_p*self.u0/self.gamma_p
 		self.cc        = (self.epsilon*self.alpha_p*self.gamma_b - self.gamma_p*self.alpha_b)/(self.alpha_p*self.gamma_p**2*np.sqrt(1 - self.epsilon**2))
@@ -62,8 +62,8 @@ class CAEP:
 		self.Solve()
 		
 		
-	def print_params(self, t=0):
-		print('time= ', t, ' nu=', self.nu, ', c=', self.cc, ', a=', self.aa, ' lambda=', self.lamda)
+	def print_params(self, t=0, un=-1):
+		print('time= ', t, ' nu=', self.nu, ', c=', self.cc, ', a=', self.aa, ' lambda=', self.lamda, ' u=', un)
 
 	def get_PDF(self):
 		self.K = abs(gamma(complex(self.nu, self.cc)))**2/(self.aa*np.sqrt(np.pi)*gamma(self.nu)*gamma(self.nu - 0.5))             
@@ -72,20 +72,30 @@ class CAEP:
 
 
 	def get_pulse(self, t):
-		if self.sinusoid: 
+		if self.test==0:
+			return self.E0
+		elif self.test==1: 
 			return self.E0*(1 + 0.1*np.cos(np.pi*t/0.2e-6))
-		else:
+		elif self.test==2:
 			return self.E0*(np.exp(-t/0.2e-6))
+		elif self.test==3:
+			if t<0.5*self.tfinal:
+				return self.E0
+			else:
+				return 0
+
 
 
 
 	def calculate_p_bar(self):
-		p_bar_at_t = np.sum(self.x*self.W)*(self.x[1]-self.x[0])
+		#p_bar_at_t = np.sum(self.x*self.W)*(self.x[1]-self.x[0])
+		integ = self.x*self.W
+		p_bar_at_t = integrate.simps(integ, self.x)
 		return p_bar_at_t
 
 	def get_u(self, tnow):
 		self.p_bar = self.calculate_p_bar()
-		self.u = self.sigma_e*self.get_pulse(tnow) + self.phi*self.p_bar
+		self.u = self.sigma_e*self.get_pulse(tnow) - self.phi*self.p_bar
 		return self.u
 
 
@@ -101,18 +111,19 @@ class CAEP:
 		pass
 
 	def update_params(self, t, mu, s2):
-		self.u_store.append(self.get_u(t))
-		self.lamda = -self.epsilon*self.alpha_p*self.get_u(t)/self.gamma_p
-		self.aa    = self.alpha_p*self.get_u(t)*np.sqrt(1- self.epsilon**2)/self.gamma_p
+		un = self.get_u(t)
+		self.u_store.append(un)
+		self.lamda = -self.epsilon*self.alpha_p*un/self.gamma_p
+		self.aa    =  self.alpha_p*un*np.sqrt(1- self.epsilon**2)/self.gamma_p
 		self.nu    = (self.aa**2 + (mu - self.lamda)**2 + 3*s2)/(2*s2)
 		self.cc    = (mu - self.lamda)*(self.aa**2 + (mu - self.lamda)**2 + s2)/(2*self.aa*s2)
 		self.get_PDF()
-		self.print_params(t)
+		self.print_params(t, un)
 
 
 	def dmu_sigma2(self, t, y):
 		self.update_params(t, y[0], y[1])
-		u       = self.get_u(t)
+		u       =  self.get_u(t)
 		dmu     = -self.gamma_b*y[0] - self.alpha_b*u + 0.5*self.gamma_p**2*y[0] + 0.5*self.epsilon*self.alpha_p*self.gamma_p*u
 		dsigma2 = -2*(self.gamma_b - self.gamma_p**2)*y[1] + self.gamma_p**2*y[0]**2 + 2*self.epsilon*self.gamma_p*self.alpha_p*u*y[0] + self.alpha_p**2*u**2
 		return [dmu, dsigma2]
@@ -123,11 +134,19 @@ class CAEP:
 		self.times = self.sol.t
 		self.mus     = self.sol.y[0]
 		self.sigma2s = self.sol.y[1]
-		plt.figure(figsize=(7,7))
-		plt.plot(1e6*self.times, self.mus/np.max(abs(self.mus)), 'g', label=r'$\rm \mu/\vert \mu \vert_{\max} $')
-		plt.plot(1e6*self.times, self.sigma2s/np.max(self.sigma2s), 'r', label=r'$\rm \sigma^2/\sigma^2_{\max}$')
-		plt.xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
-		plt.legend(fontsize=15, frameon=False)
+		#plt.figure(figsize=(7,7))
+		fig, ax = plt.subplots(1, 2, figsize=(15,7))
+		ax[0].plot(1e6*self.times, -self.mus, 'g')
+		ax[1].plot(1e6*self.times, self.sigma2s, 'r')
+		#plt.plot(1e6*self.times, self.mus/np.max(abs(self.mus)), 'g', label=r'$\rm \mu/\vert \mu \vert_{\max} $')
+		#plt.plot(1e6*self.times, self.sigma2s/np.max(self.sigma2s), 'r', label=r'$\rm \sigma^2/\sigma^2_{\max}$')
+		ax[0].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
+		ax[1].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
+		ax[0].set_ylabel(r'$\rm -\mu$', fontsize=25)
+		ax[1].set_ylabel(r'$\rm \sigma^2$', fontsize=25)
+		ax[1].yaxis.set_ticks_position("right")
+		ax[1].yaxis.set_label_position("right") 
+		#plt.legend(fontsize=15, frameon=False)
 		plt.show()
 		plt.ion()
 		plt.figure(figsize=(7,7))
