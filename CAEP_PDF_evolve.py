@@ -15,10 +15,10 @@ from astroML.plotting import setup_text_plots
 setup_text_plots(fontsize=15, usetex=True)
 
 class CAEP:
-	def __init__(self, epsilon, xmin, xmax):
-		self.test    = 3
+	def __init__(self, epsilon, xmin, xmax, testnum, tf):
+		self.test    = testnum
 		# physical parameters 
-		self.tfinal  = 1e-6   
+		self.tfinal  = tf   
 		self.scaling = 1e-3            
 		self.xmin    = xmin                                      # A/mm^2
 		self.xmax    = xmax                                      # A/mm^2
@@ -54,8 +54,10 @@ class CAEP:
 		# initialize W
 		self.W = self.get_PDF()
 		# initial conditions
-		self.mu_ini      = np.sum(self.x*self.W)*(self.x[1]-self.x[0])       
-		self.sigma2_ini  = np.sum(self.x**2*self.W)*(self.x[1]-self.x[0]) - self.mu_ini**2
+		mu_int           = self.x*self.W
+		var_int          = self.x**2*self.W
+		self.mu_ini      = integrate.simps(mu_int, self.x) #np.sum(self.x*self.W)*(self.x[1]-self.x[0])       
+		self.sigma2_ini  = integrate.simps(var_int, self.x) - self.mu_ini**2 #np.sum(self.x**2*self.W)*(self.x[1]-self.x[0]) - self.mu_ini**2
 		#self.mu_ini = self.aa*self.cc/(self.nu - 1) + self.lamda
 		#self.sigma2_ini = (self.gamma_p**2*self.mu_ini**2 + 2*self.epsilon*self.gamma_p*self.alpha_p*self.u0*self.mu_ini + self.alpha_p**2*self.u0**2)/(2*(self.gamma_b - self.gamma_p))
 		#self.plot()
@@ -66,7 +68,7 @@ class CAEP:
 		print('time= ', t, ' nu=', self.nu, ', c=', self.cc, ', a=', self.aa, ' lambda=', self.lamda, ' u=', un)
 
 	def get_PDF(self):
-		self.K = abs(gamma(complex(self.nu, self.cc)))**2/(self.aa*np.sqrt(np.pi)*gamma(self.nu)*gamma(self.nu - 0.5))             
+		self.K = abs(gamma(complex(self.nu, self.cc)))**2/(self.aa*np.sqrt(np.pi)*gamma(self.nu)*gamma(self.nu - 0.5)) 
 		self.W = self.K*np.exp(2*self.cc*np.arctan((self.x - self.lamda)/self.aa))/(1 + ((self.x - self.lamda)/self.aa)**2)**self.nu
 		return self.W
 
@@ -128,25 +130,24 @@ class CAEP:
 		dsigma2 = -2*(self.gamma_b - self.gamma_p**2)*y[1] + self.gamma_p**2*y[0]**2 + 2*self.epsilon*self.gamma_p*self.alpha_p*u*y[0] + self.alpha_p**2*u**2
 		return [dmu, dsigma2]
 
+	def jacob(self, t,y):
+		return np.array([[-self.gamma_b + 0.5*self.gamma_p**2, 0], [2*self.gamma_p**2*y[0]+2*self.epsilon*self.gamma_p*self.alpha_p*self.get_u(t), -4*(self.gamma_b-self.gamma_p**2)*np.sqrt(y[1]) ] ])
+
 	def Solve(self):
 		y0 = [self.mu_ini, self.sigma2_ini]
-		self.sol = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA')
+		self.sol = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-8, jac=self.jacob) 
 		self.times = self.sol.t
 		self.mus     = self.sol.y[0]
 		self.sigma2s = self.sol.y[1]
-		#plt.figure(figsize=(7,7))
 		fig, ax = plt.subplots(1, 2, figsize=(15,7))
 		ax[0].plot(1e6*self.times, -self.mus, 'g')
 		ax[1].plot(1e6*self.times, self.sigma2s, 'r')
-		#plt.plot(1e6*self.times, self.mus/np.max(abs(self.mus)), 'g', label=r'$\rm \mu/\vert \mu \vert_{\max} $')
-		#plt.plot(1e6*self.times, self.sigma2s/np.max(self.sigma2s), 'r', label=r'$\rm \sigma^2/\sigma^2_{\max}$')
 		ax[0].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 		ax[1].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 		ax[0].set_ylabel(r'$\rm -\mu$', fontsize=25)
 		ax[1].set_ylabel(r'$\rm \sigma^2$', fontsize=25)
 		ax[1].yaxis.set_ticks_position("right")
 		ax[1].yaxis.set_label_position("right") 
-		#plt.legend(fontsize=15, frameon=False)
 		plt.show()
 		plt.ion()
 		plt.figure(figsize=(7,7))
@@ -182,7 +183,12 @@ class CAEP:
 		plt.show()
 
 
-SEP = CAEP(0.8, -3, 3)
+testnum = 3
+tf      = 1.0e-6    # [s]
+eps     = 0.9
+xmin    = -3
+xmax    =  3
+SEP = CAEP(eps, xmin, xmax, testnum, tf)
 pdb.set_trace()
 
 
