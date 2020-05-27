@@ -16,7 +16,7 @@ setup_text_plots(fontsize=15, usetex=True)
 import scipy.fftpack
 
 class CAEP:
-	def __init__(self, epsilon, xmin, xmax, testnum, tf):
+	def __init__(self, epsilon, xmin, xmax, testnum, tf, ap_factor):
 		self.animate = False
 		self.test    = testnum
 		# physical parameters 
@@ -25,6 +25,7 @@ class CAEP:
 		self.xmin    = xmin                                      # A/mm^2
 		self.xmax    = xmax                                      # A/mm^2
 		self.x       = np.linspace(self.xmin, self.xmax, 2000)
+		self.Delta   = 10*(self.x[1] - self.x[0])
 		self.E0      = 40000*self.scaling                        # V/mm
 		self.sigma_e = 15*self.scaling                           # S/mm
 		self.sigma_c = 1*self.scaling                            # S/mm
@@ -39,11 +40,14 @@ class CAEP:
 		# stochastic parameters
 		self.epsilon = epsilon                          # correlation between alpha and gamma \in [-1, 1]
 		self.gamma_p = np.sqrt(self.gamma_b/7.0)        # noise in gamma
-		self.alpha_p = self.alpha_b*(self.gamma_p/self.gamma_b)/self.epsilon  # noise in alpha; was np.sqrt(self.alpha_b/3.0)       
+		# noise in alpha; was np.sqrt(self.alpha_b/3.0)       
+		self.alpha_p = ap_factor*self.alpha_b*(self.gamma_p/self.gamma_b)/self.epsilon  
 
+		self.eta     = 1 + self.SL*self.sigma_t*self.R/((2+ self.phi)*self.sigma_e*self.sigma_c)
+		self.tau     = self.Cm*self.sigma_t*self.R/((2+self.phi)*self.sigma_e*self.sigma_c)
 
 		# initialize the t Student PDF parameters
-		self.u0        =  0.5*self.sigma_e*self.get_pulse(0)
+		self.u0        =  self.sigma_e*self.get_pulse(0)
 		self.nu        =  0.5 + self.gamma_b/self.gamma_p**2
 		self.lamda     = -self.epsilon*self.alpha_p*self.u0/self.gamma_p
 		self.cc        = (self.epsilon*self.alpha_p*self.gamma_b - self.gamma_p*self.alpha_b)/(self.alpha_p*self.gamma_p**2*np.sqrt(1 - self.epsilon**2))
@@ -56,7 +60,8 @@ class CAEP:
 		self.W_store   = []
 		self.print_params()
 		# initialize W
-		self.W = self.get_PDF()
+		#self.W = self.get_PDF()
+		self.W = self.initial_condition()
 		# initial conditions
 		mu_int           = self.x*self.W
 		var_int          = self.x**2*self.W
@@ -67,6 +72,13 @@ class CAEP:
 		#self.plot()
 		self.Solve()
 		
+	"""
+	initialize by delta distribution around origin
+	see Dehghan & Mohammadi 2014
+	"""
+	def initial_condition(self):
+		self.W = (0.5/np.sqrt(np.pi*self.Delta))*np.exp(-self.x**2/(4.0*self.Delta))
+		return self.W
 		
 	def print_params(self, t=0, un=-1):
 		print('time= ', t, ' nu=', self.nu, ', c=', self.cc, ', a=', self.aa, ' lambda=', self.lamda, ' u=', un)
@@ -96,13 +108,12 @@ class CAEP:
 				return 0
 		elif self.test==5:
 			return self.E0*np.exp(-6*((t-0.5*self.tfinal)/self.tfinal)**2)
-		elif self.test==6:
-			return self.E0*(1.1+np.sin(2*np.pi*t/self.tfinal))
+
 
 	def calculate_p_bar(self):
 		#p_bar_at_t = np.sum(self.x*self.W)*(self.x[1]-self.x[0])
 		integ = self.x*self.W
-		p_bar_at_t = integrate.simps(integ, self.x)
+		p_bar_at_t = integrate.trapz(integ, self.x)
 		return p_bar_at_t
 
 	def get_u(self, tnow):
@@ -120,7 +131,6 @@ class CAEP:
 		plt.legend(fontsize=20, loc=2, frameon=False)
 		plt.tight_layout()
 		plt.show()
-		pass
 
 	def update_params(self, t, mu, s2):
 		un = self.get_u(t)
@@ -144,12 +154,13 @@ class CAEP:
 		return np.array([[-self.gamma_b + 0.5*self.gamma_p**2, 0], [2*self.gamma_p**2*y[0]+2*self.epsilon*self.gamma_p*self.alpha_p*self.get_u(t), -4*(self.gamma_b-self.gamma_p**2)*np.sqrt(y[1]) ] ])
 
 	def Solve(self):
-		self.t_evaluation = np.linspace(0, self.tfinal, 900)
+		self.t_evaluation = np.linspace(0, self.tfinal, 1000)
 		y0 = [self.mu_ini, self.sigma2_ini]
-		self.sol = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', atol=1e-15, jac=self.jacob, max_step=2e-9, t_eval=self.t_evaluation) 
+		self.sol = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob, max_step=2e-9, t_eval=self.t_evaluation) 
 		self.times = self.sol.t
 		self.mus     = self.sol.y[0]
 		self.sigma2s = self.sol.y[1]
+		self.Es = np.array([self.get_pulse(t) for t in self.times])
 		fig, ax = plt.subplots(1, 2, figsize=(15,7))
 		ax[0].plot(1e6*self.times, -self.mus, 'g')
 		ax[1].plot(1e6*self.times, self.sigma2s, 'r')
@@ -170,7 +181,7 @@ class CAEP:
 			self.aa_store.append(self.aa)
 			self.nu_store.append(self.nu)
 			self.cc_store.append(self.cc)
-			self.W_store.append(self.W)
+			self.W_store.append(self.W/np.max(self.W))
 			if self.animate:
 				plt.plot(-self.x, self.W, color='k', linewidth=2)
 				plt.xlim([self.xmin, self.xmax])
@@ -202,13 +213,11 @@ class CAEP:
 		X, T = np.meshgrid(-self.x, 1e6*self.times)
 		cmap = plt.cm.plasma
 		cmap.set_under(color='w')
-		Ws = self.W_store
-		Ws[Ws>4] = 4.0
 		plt.figure(figsize=(7,7))
-		plt.pcolor(T, X, self.W_store, cmap=cmap, vmin=1.0)
-		plt.ylim([0, 1.5])
+		plt.pcolor(T, X, self.W_store, cmap=cmap, vmin=0.5)
 		plt.xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 		plt.ylabel(r'$\rm p_z\ [A/mm^2]$', fontsize=25)
+		plt.ylim([0,1.5])
 		plt.tight_layout()
 		plt.show()
 
@@ -218,7 +227,8 @@ class CAEP:
 		self.yf = scipy.fftpack.fft(self.mus)
 		self.xf = np.linspace(0.0, 1.0/(2.0*T), N/2)
 		plt.figure(figsize=(7,7))
-		plt.plot(self.xf, 2.0/N * np.abs(self.yf[:N//2]))
+		plt.plot(self.xf, 2.0/N * np.abs(self.yf[:N//2]), linewidth=2, color='k')
+		plt.scatter(self.xf, 2.0/N * np.abs(self.yf[:N//2]), s=5, color='r')
 		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
 		plt.ylabel(r'$\rm \vert p(f)\vert$', fontsize=25)
 		plt.yscale('log')
@@ -226,13 +236,70 @@ class CAEP:
 		plt.tight_layout()
 		plt.show()
 
-testnum = 5
-tf      = 1.80e-6    # [s]
-eps     = 0.9
+
+		self.sigma_eff = self.sigma_e*(1 - 3*self.phi*((self.sigma_e - self.sigma_c)/self.sigma_t)*((self.eta-1) + complex(0,1)*self.xf*self.tau)/(self.eta + complex(0,1)*self.xf*self.tau))
+		uf = scipy.fftpack.fft(self.u_store)
+		Ef = scipy.fftpack.fft(self.Es)
+		self.uf = 2.0/N * np.abs(uf[:N//2])
+		self.Ef = 2.0/N * np.abs(Ef[:N//2])
+		self.Z = self.Ef/(1 + self.phi*(self.sigma_eff-self.sigma_e)/self.sigma_e)/self.uf
+
+		fig, axes = plt.subplots(2, figsize=(7,7))
+		axes[0].plot(self.xf, np.real(self.sigma_eff/self.sigma_e), linewidth=2, color='k')
+		axes[1].plot(self.xf, np.imag(self.sigma_eff/self.sigma_e), linewidth=2, color='k')
+		axes[0].set_xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
+		axes[1].set_xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
+		axes[0].set_ylabel(r'$\rm Re(\bar{\sigma})/\sigma_e$', fontsize=25)
+		axes[1].set_ylabel(r'$\rm Im(\bar{\sigma})/\sigma_e$', fontsize=25)
+		axes[0].set_yscale('log')
+		axes[0].set_xscale('log')
+		axes[1].set_xscale('log')
+		axes[0].set_ylim([0.82, 1.02])
+		axes[1].set_ylim([-0.1, 0])
+		plt.tight_layout()
+		plt.show()
+
+		plt.figure(figsize=(7,7))
+		plt.plot(np.real(self.sigma_eff/self.sigma_e), np.imag(self.sigma_eff/self.sigma_e), linewidth=2, color='k')
+		plt.xlabel(r'$\rm Re(\bar{\sigma})/\sigma_e$', fontsize=25)
+		plt.ylabel(r'$\rm Im(\bar{\sigma})/\sigma_e$', fontsize=25)
+		plt.xlim([0.82, 1.02])
+		plt.ylim([-0.1, 0.1])
+		plt.tight_layout()
+		plt.show()
+
+
+		fig, axes = plt.subplots(2, figsize=(7,7))
+		axes[0].plot(self.xf, np.real(self.Z), linewidth=1, color='k')
+		axes[1].plot(self.xf, np.imag(self.Z), linewidth=1, color='k')
+		axes[0].set_xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
+		axes[1].set_xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
+		axes[0].set_ylabel(r'$\rm Re(Z)$', fontsize=25)
+		axes[1].set_ylabel(r'$\rm Im(Z)$', fontsize=25)
+		axes[0].set_xscale('log')
+		axes[1].set_xscale('log')
+		plt.tight_layout()
+		plt.show()
+
+
+		plt.figure(figsize=(7,7))
+		plt.plot(self.xf, np.abs(self.Z), linewidth=1, color='k')
+		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
+		plt.ylabel(r'$\rm \vert Z \vert$', fontsize=25)
+		plt.yscale('log')
+		plt.xscale('log')
+		plt.tight_layout()
+		plt.show()
+
+
+testnum = 1
+tf      = 1.5e-6    # [s]
+eps     = 0.99
 xmin    = -2
 xmax    =  2
-sep     = CAEP(eps, xmin, xmax, testnum, tf)
-#sep.evolution_pdf()
+ap_fac  = 1.45
+sep     = CAEP(eps, xmin, xmax, testnum, tf, ap_fac)
+# sep.evolution_pdf()
 sep.fourier_analysis()
 
 pdb.set_trace()
