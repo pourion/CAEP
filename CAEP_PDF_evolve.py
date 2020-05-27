@@ -226,11 +226,18 @@ class CAEP:
 	def fourier_analysis(self):
 		N = len(self.times)
 		T = self.times[1] - self.times[0]
-		self.yf = scipy.fftpack.fft(self.mus)
+		yf = scipy.fftpack.fft(self.mus)
+		self.yf = 2.0/N * np.abs(yf[:N//2])
 		self.xf = np.linspace(0.0, 1.0/(2.0*T), N/2)
+		self.sigma_eff = self.sigma_e*(1 - 3*self.phi*((self.sigma_e - self.sigma_c)/self.sigma_t)*((self.eta-1) + complex(0,1)*self.xf*self.tau)/(self.eta + complex(0,1)*self.xf*self.tau))
+		uf = scipy.fftpack.fft(self.u_store)
+		Ef = scipy.fftpack.fft(self.Es)
+		self.uf = 2.0/N * np.abs(uf[:N//2])
+		self.Ef = 2.0/N * np.abs(Ef[:N//2])
+
 		plt.figure(figsize=(7,7))
-		plt.plot(self.xf, 2.0/N * np.abs(self.yf[:N//2]), linewidth=2, color='k')
-		plt.scatter(self.xf, 2.0/N * np.abs(self.yf[:N//2]), s=5, color='r')
+		plt.plot(self.xf, self.yf, linewidth=2, color='k')
+		plt.scatter(self.xf, self.yf, s=5, color='r')
 		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
 		plt.ylabel(r'$\rm \vert p(f)\vert$', fontsize=25)
 		plt.yscale('log')
@@ -239,12 +246,9 @@ class CAEP:
 		plt.show()
 
 
-		self.sigma_eff = self.sigma_e*(1 - 3*self.phi*((self.sigma_e - self.sigma_c)/self.sigma_t)*((self.eta-1) + complex(0,1)*self.xf*self.tau)/(self.eta + complex(0,1)*self.xf*self.tau))
-		uf = scipy.fftpack.fft(self.u_store)
-		Ef = scipy.fftpack.fft(self.Es)
-		self.uf = 2.0/N * np.abs(uf[:N//2])
-		self.Ef = 2.0/N * np.abs(Ef[:N//2])
-		self.Z = self.Ef/(1 + self.phi*(self.sigma_eff-self.sigma_e)/self.sigma_e)/self.uf
+		
+		denom = self.sigma_e*self.Ef + self.phi*self.yf
+		self.Z = self.Ef/(1 + self.phi*(self.sigma_eff-self.sigma_e)/self.sigma_e)/denom #self.uf
 		self.permittivity = self.permittivity_bar + complex(0,1)*self.sigma_eff/(2*np.pi*self.xf)
 
 
@@ -297,12 +301,13 @@ class CAEP:
 
 
 testnum = 5
-tf      = 1.5e-4    # [s]
+tf      = 1.5e-6    # [s]
 eps     = 0.99
 xmin    = -2
 xmax    =  2
 ap_fac  = 1.45
-sep     = CAEP(eps, xmin, xmax, testnum, tf, ap_fac, 100000)
+t_samples = 10000
+sep     = CAEP(eps, xmin, xmax, testnum, tf, ap_fac, t_samples)
 # sep.evolution_pdf()
 sep.fourier_analysis()
 
