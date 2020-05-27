@@ -16,9 +16,10 @@ setup_text_plots(fontsize=15, usetex=True)
 import scipy.fftpack
 
 class CAEP:
-	def __init__(self, epsilon, xmin, xmax, testnum, tf, ap_factor):
+	def __init__(self, epsilon, xmin, xmax, testnum, tf, ap_factor, eval_points=1000):
 		self.animate = False
 		self.test    = testnum
+		self.eval_point = eval_points
 		# physical parameters 
 		self.tfinal  = tf   
 		self.scaling = 1e-3            
@@ -33,6 +34,7 @@ class CAEP:
 		self.SL      = 1.9*self.scaling**2                       # S/mm^2
 		self.R       = 7.0e-6/self.scaling                       # mm
 		self.phi     = 0.13
+		self.permittivity_bar = 1.0
 
 		self.sigma_t = 2*self.sigma_e + self.sigma_c + self.phi*(self.sigma_e - self.sigma_c)
 		self.alpha_b = 3*self.sigma_e*self.sigma_c/(self.Cm*self.R*self.sigma_t)
@@ -154,7 +156,7 @@ class CAEP:
 		return np.array([[-self.gamma_b + 0.5*self.gamma_p**2, 0], [2*self.gamma_p**2*y[0]+2*self.epsilon*self.gamma_p*self.alpha_p*self.get_u(t), -4*(self.gamma_b-self.gamma_p**2)*np.sqrt(y[1]) ] ])
 
 	def Solve(self):
-		self.t_evaluation = np.linspace(0, self.tfinal, 1000)
+		self.t_evaluation = np.linspace(0, self.tfinal, self.eval_point)
 		y0 = [self.mu_ini, self.sigma2_ini]
 		self.sol = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob, max_step=2e-9, t_eval=self.t_evaluation) 
 		self.times = self.sol.t
@@ -243,6 +245,8 @@ class CAEP:
 		self.uf = 2.0/N * np.abs(uf[:N//2])
 		self.Ef = 2.0/N * np.abs(Ef[:N//2])
 		self.Z = self.Ef/(1 + self.phi*(self.sigma_eff-self.sigma_e)/self.sigma_e)/self.uf
+		self.permittivity = self.permittivity_bar + complex(0,1)*self.sigma_eff/(2*np.pi*self.xf)
+
 
 		fig, axes = plt.subplots(2, figsize=(7,7))
 		axes[0].plot(self.xf, np.real(self.sigma_eff/self.sigma_e), linewidth=2, color='k')
@@ -292,13 +296,13 @@ class CAEP:
 		plt.show()
 
 
-testnum = 1
-tf      = 1.5e-6    # [s]
+testnum = 5
+tf      = 1.5e-4    # [s]
 eps     = 0.99
 xmin    = -2
 xmax    =  2
 ap_fac  = 1.45
-sep     = CAEP(eps, xmin, xmax, testnum, tf, ap_fac)
+sep     = CAEP(eps, xmin, xmax, testnum, tf, ap_fac, 100000)
 # sep.evolution_pdf()
 sep.fourier_analysis()
 
