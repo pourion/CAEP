@@ -16,17 +16,18 @@ setup_text_plots(fontsize=15, usetex=True)
 import scipy.fftpack
 
 class CAEP:
-	def __init__(self, epsilon, xmin, xmax, testnum, tf, ap_factor, eval_points=1000):
+	def __init__(self, epsilon, xmin, xmax, testnum, tf, ap_factor, gm_factor=np.sqrt(1./7.0), maxstep =2e-9, eval_points=1000, Nx=2000):
 		self.animate = False
 		self.test    = testnum
+		self.maxstep = maxstep
 		self.eval_point = eval_points
 		# physical parameters 
 		self.tfinal  = tf   
 		self.scaling = 1e-3            
 		self.xmin    = xmin                                      # A/mm^2
 		self.xmax    = xmax                                      # A/mm^2
-		self.x       = np.linspace(self.xmin, self.xmax, 2000)
-		self.Delta   = 10*(self.x[1] - self.x[0])
+		self.x       = np.linspace(self.xmin, self.xmax, Nx)
+		self.Delta   = 0.0025 #0.2*(self.x[1] - self.x[0])
 		self.E0      = 40000*self.scaling                        # V/mm
 		self.sigma_e = 15*self.scaling                           # S/mm
 		self.sigma_c = 1*self.scaling                            # S/mm
@@ -41,7 +42,7 @@ class CAEP:
 		self.gamma_b = self.SL/self.Cm + (self.sigma_e * self.sigma_c * (2 + self.phi))/(self.R*self.Cm*self.sigma_t)
 		# stochastic parameters
 		self.epsilon = epsilon                          # correlation between alpha and gamma \in [-1, 1]
-		self.gamma_p = np.sqrt(self.gamma_b/7.0)        # noise in gamma
+		self.gamma_p = gm_factor*np.sqrt(self.gamma_b)        # noise in gamma
 		# noise in alpha; was np.sqrt(self.alpha_b/3.0)       
 		self.alpha_p = ap_factor*self.alpha_b*(self.gamma_p/self.gamma_b)/self.epsilon  
 
@@ -64,6 +65,7 @@ class CAEP:
 		# initialize W
 		#self.W = self.get_PDF()
 		self.W = self.initial_condition()
+
 		# initial conditions
 		mu_int           = self.x*self.W
 		var_int          = self.x**2*self.W
@@ -120,7 +122,7 @@ class CAEP:
 
 	def get_u(self, tnow):
 		self.p_bar = self.calculate_p_bar()
-		self.u = self.sigma_e*self.get_pulse(tnow) - self.phi*self.p_bar
+		self.u = self.sigma_e*self.get_pulse(tnow) + self.phi*self.p_bar
 		return self.u
 
 
@@ -158,7 +160,7 @@ class CAEP:
 	def Solve(self):
 		self.t_evaluation = np.linspace(0, self.tfinal, self.eval_point)
 		y0 = [self.mu_ini, self.sigma2_ini]
-		self.sol = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob, max_step=2e-9, t_eval=self.t_evaluation) 
+		self.sol = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob, max_step=self.maxstep, t_eval=self.t_evaluation) 
 		self.times = self.sol.t
 		self.mus     = self.sol.y[0]
 		self.sigma2s = self.sol.y[1]
@@ -216,10 +218,10 @@ class CAEP:
 		cmap = plt.cm.plasma
 		cmap.set_under(color='w')
 		plt.figure(figsize=(7,7))
-		plt.pcolor(T, X, self.W_store, cmap=cmap, vmin=0.5)
+		plt.pcolor(T, X, self.W_store, cmap=cmap) #, vmin=0.5)
 		plt.xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 		plt.ylabel(r'$\rm p_z\ [A/mm^2]$', fontsize=25)
-		plt.ylim([0,1.5])
+		plt.ylim([0,1.3])
 		plt.tight_layout()
 		plt.show()
 
@@ -300,14 +302,18 @@ class CAEP:
 		plt.show()
 
 
-testnum = 5
-tf      = 1.5e-6    # [s]
-eps     = 0.99
-xmin    = -2
-xmax    =  2
-ap_fac  = 1.45
-t_samples = 10000
-sep     = CAEP(eps, xmin, xmax, testnum, tf, ap_fac, t_samples)
+testnum    =  5
+tf         =  1.e-6    # [s]
+eps        =  0.9
+xmin       = -5.0
+xmax       =  5.0
+nx         =  5000
+t_samples  =  200
+max_t_step =  1e-9
+
+ap_fac     =  1.1      # determines asymmetry of solution (c)
+gm_factor  =  0.385       # determines sharpness, it affects nu: bigger nu means sharper! gm_factor = 0.4 is good
+sep        = CAEP(eps, xmin, xmax, testnum, tf, ap_fac, gm_factor, max_t_step, t_samples, nx)
 # sep.evolution_pdf()
 sep.fourier_analysis()
 
