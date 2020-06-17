@@ -15,6 +15,9 @@ from astroML.plotting import setup_text_plots
 setup_text_plots(fontsize=15, usetex=True)
 import scipy.fftpack
 
+def sigmoid(x):
+  return 1 / (1 + np.exp(-x))
+
 class CAEP:
 	def __init__(self, epsilon, xmin, xmax, testnum, tf, ap_factor, gm_factor, maxstep =2e-9, eval_points=1000, Nx=2000, phi=0.13):
 		self.animate = False
@@ -33,7 +36,7 @@ class CAEP:
 		self.sigma_c = 1*self.scaling                            # S/mm
 		self.Cm      = 0.01*self.scaling**2                      # F/mm^2
 		self.SL      = 1.9*self.scaling**2                       # S/mm^2
-		self.R       = 4.5e-6/self.scaling                       # mm
+		self.R       = 4.50e-6/self.scaling                       # mm
 		self.phi     = phi
 		self.permittivity_bar = 1.0
 
@@ -48,7 +51,11 @@ class CAEP:
 
 		self.eta     = 1 + self.SL*self.sigma_t*self.R/((2 + self.phi)*self.sigma_e*self.sigma_c)
 		self.tau     = self.Cm*self.sigma_t*self.R/((2 + self.phi)*self.sigma_e*self.sigma_c)
-
+		self.omega   = 0.0
+		self.chi     = -( 3*self.phi/(self.eta + complex(0, self.omega*self.tau)) ) * ( 1.0/(2+self.phi) \
+						+ ((self.sigma_e - self.sigma_c)/self.sigma_t)*(self.eta - 1 + complex(0, self.omega*self.tau)) )
+		self.chi     = abs(self.chi)
+		# pdb.set_trace()
 		# initialize the t Student PDF parameters
 		self.u0        =  self.sigma_e*self.get_pulse(0)
 		self.nu        =  0.5 + self.gamma_b/self.gamma_p**2
@@ -74,7 +81,7 @@ class CAEP:
 		#self.mu_ini = self.aa*self.cc/(self.nu - 1) + self.lamda
 		#self.sigma2_ini = (self.gamma_p**2*self.mu_ini**2 + 2*self.epsilon*self.gamma_p*self.alpha_p*self.u0*self.mu_ini + self.alpha_p**2*self.u0**2)/(2*(self.gamma_b - self.gamma_p))
 		#self.plot()
-		# self.Solve()
+		#self.Solve()
 		
 	"""
 	initialize by delta distribution around origin
@@ -112,6 +119,11 @@ class CAEP:
 				return 0
 		elif self.test==5:
 			return self.E0*np.exp(-6*((t-0.5*self.tfinal)/self.tfinal)**2)
+		elif self.test==6:
+			if t<1e-6:
+				return self.E0*sigmoid(1000*t/self.tfinal)
+			else:
+				return 0.0
 
 
 	def calculate_p_bar(self):
@@ -122,16 +134,15 @@ class CAEP:
 
 	def get_u(self, tnow):
 		self.p_bar = self.calculate_p_bar()
-		self.u = self.sigma_e*self.get_pulse(tnow) + self.phi*self.p_bar   # PAM
+		self.u = self.sigma_e*self.get_pulse(tnow)*(1 + self.chi) #- self.phi*self.p_bar   
 		return self.u
-
 
 	def plot(self):
 		plt.figure(figsize=(7,7))
-		plt.plot(-self.x, self.W, color='k', linewidth=2)
+		plt.plot(self.x, self.W, color='k', linewidth=2)
 		plt.xlim([self.xmin, self.xmax])
 		plt.ylabel(r'$\rm W_s(p_z)$', fontsize=25)
-		plt.xlabel(r'$\rm -p_z\ [A/mm^2]$', fontsize=25)
+		plt.xlabel(r'$\rm p_z\ [A/mm^2]$', fontsize=25)
 		plt.legend(fontsize=20, loc=2, frameon=False)
 		plt.tight_layout()
 		plt.show()
@@ -161,7 +172,7 @@ class CAEP:
 		self.t_evaluation = np.linspace(0, self.tfinal, self.eval_point)
 		y0 = [self.mu_ini, self.sigma2_ini]
 		self.sol = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob, max_step=self.maxstep, t_eval=self.t_evaluation) 
-		self.times = self.sol.t
+		self.times   = self.sol.t
 		self.mus     = self.sol.y[0]
 		self.sigma2s = self.sol.y[1]
 		self.Es = np.array([self.get_pulse(t) for t in self.times])
@@ -170,7 +181,7 @@ class CAEP:
 		ax[1].plot(1e6*self.times, self.sigma2s, 'r')
 		ax[0].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 		ax[1].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
-		ax[0].set_ylabel(r'$\rm -\mu$', fontsize=25)
+		ax[0].set_ylabel(r'$\rm \mu$', fontsize=25)
 		ax[1].set_ylabel(r'$\rm \sigma^2$', fontsize=25)
 		ax[1].yaxis.set_ticks_position("right")
 		ax[1].yaxis.set_label_position("right") 
@@ -247,12 +258,9 @@ class CAEP:
 		plt.tight_layout()
 		plt.show()
 
-
-		
 		denom = self.sigma_e*self.Ef + self.phi*self.yf
 		self.Z = self.Ef/(1 + self.phi*(self.sigma_eff-self.sigma_e)/self.sigma_e)/denom #self.uf
 		self.permittivity = self.permittivity_bar + complex(0,1)*self.sigma_eff/(2*np.pi*self.xf)
-
 
 		fig, axes = plt.subplots(2, figsize=(7,7))
 		axes[0].plot(self.xf, np.real(self.sigma_eff/self.sigma_e), linewidth=2, color='k')
@@ -278,7 +286,6 @@ class CAEP:
 		plt.tight_layout()
 		plt.show()
 
-
 		fig, axes = plt.subplots(2, figsize=(7,7))
 		axes[0].plot(self.xf, np.real(self.Z), linewidth=1, color='k')
 		axes[1].plot(self.xf, np.imag(self.Z), linewidth=1, color='k')
@@ -291,7 +298,6 @@ class CAEP:
 		plt.tight_layout()
 		plt.show()
 
-
 		plt.figure(figsize=(7,7))
 		plt.plot(self.xf, np.abs(self.Z), linewidth=1, color='k')
 		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
@@ -302,8 +308,8 @@ class CAEP:
 		plt.show()
 
 
-testnum    =  5
-tf         =  0.9e-6    # [s]
+testnum    =  4           # 6: smoothed step function, 5: Gaussian, 4: sharp step pulse
+tf         =  2.0e-6      # [s]
 eps        =  0.982       # eps = 1/(1 + a^2/lamda^2)**0.5 = 0.982 
 xmin       = -5.0
 xmax       =  5.0
@@ -312,13 +318,18 @@ t_samples  =  100
 max_t_step =  1e-9
 
 ap_fac     =  0.227          # alpha_p = alpha_b/(eps*gamma_b/gamma_p - c gamma_p (1 - eps^2)**0.5) = 2111
-gm_factor  =  0.148       # gamma_p = np.sqrt(gamma_b/(nu - 0.5)) = 1435
-phi        =  0.13
+gm_factor  =  0.148          # gamma_p = np.sqrt(gamma_b/(nu - 0.5)) = 1435
+phi        =  0.13 #*(np.pi/6.0)
 sep        =  CAEP(eps, xmin, xmax, testnum, tf, ap_fac, gm_factor, max_t_step, t_samples, nx, phi)
+
 sep.Solve()
+
 sep.evolution_pdf()
+
 sep.fourier_analysis()
+
 """
 in test=4 note that u_f = 0.598
 """
 pdb.set_trace()
+
