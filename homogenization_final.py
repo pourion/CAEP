@@ -14,8 +14,8 @@ Cm = 0.01
 sigma_e = 0.6
 nu_list=[1.3/sigma_e]
 
-#sigma_e = 15.0
-#nu_list=[1.0/sigma_e]
+sigma_e = 1.3
+nu_list=[0.6/sigma_e]
 
 phi = np.linspace(0, 0.9, 200)
 freq  = np.logspace(2, 8, 400)    
@@ -30,17 +30,18 @@ for nu in nu_list:
 	eta = 1 + g0*(1 + nu*(1-PHI)/(2 + PHI))
 	tau = SIGMA_t*R1*Cm/(sigma_e*sigma_c*(2+PHI))
 	#sigma_bar = 1 - 3*PHI*((1-nu)/(2+nu + PHI*(1-nu)))*(eta-1 + 2*np.pi*FREQ*tau*complex(0,1))/(eta + 2*np.pi*FREQ*tau*complex(0,1))
-	sigma_bar = 1 - 3*PHI*((sigma_e-sigma_c)/(SIGMA_t))*(1-1.0/(eta + complex(0,1)*2*np.pi*FREQ*tau)) / (1-PHI* ((PHI-1)*(sigma_e-sigma_c)/SIGMA_t + 3*sigma_e/(SIGMA_t*(eta + complex(0,1)*2*np.pi*FREQ*tau)) ) )
+	sigma_bar = 1 - 3*PHI*((sigma_e-sigma_c)/(SIGMA_t))*(1-1.0/(eta + complex(0,1)*2*np.pi*FREQ*tau)) #/ (1-PHI* ((PHI-1)*(sigma_e-sigma_c)/SIGMA_t + 3*sigma_e/(SIGMA_t*(eta + complex(0,1)*2*np.pi*FREQ*tau)) ) )
 
 
-	Ee_per_Eext = 1./(1.0 + (PHI*(1.0-PHI)/(2+nu+PHI*(1-nu)))*( 1 - nu + 3*nu/((2+PHI)*(eta + complex(0,1)*2*np.pi*FREQ*tau )) )  )
+	#Ee_per_Eext = 1./(1.0 + (PHI*(1.0-PHI)/(2+nu+PHI*(1-nu)))*( 1 - nu + 3*nu/((2+PHI)*(eta + complex(0,1)*2*np.pi*FREQ*tau )) )  )
+	 
 
 	a_t = -3.0/((2+PHI)*(eta + complex(0,1)*2*np.pi*FREQ*tau))
 	b_t = -3.0*(sigma_e - sigma_c)*(eta-1+complex(0,1)*2*np.pi*FREQ*tau)/( (eta+complex(0,1)*2*np.pi*FREQ*tau) * SIGMA_t)
-	denom = 1.0 - (1.0 + a_t + b_t*sigma_e/(sigma_e - sigma_c))*PHI
-	chi_p = PHI*a_t/denom
-	chi_s = PHI*b_t/denom
-
+	#denom = 1.0 - (1.0 + a_t + b_t*sigma_e/(sigma_e - sigma_c))*PHI
+	chi_p = PHI*a_t   #/denom
+	chi_s = PHI*b_t   #/denom
+	Ee_per_Eext = (1 - nu + chi_s)/( (1-nu)*(1-PHI)*(1-chi_p) )
 
 	fig = plt.figure(figsize=(7,7))
         ax = fig.gca(projection='3d')
@@ -92,7 +93,7 @@ for nu in nu_list:
 	H = 1.0e-3
 	A = 1.0e-6
 	Ze = H/(sigma_e*A)
-	Z = Ze/(1 + chi_p + chi_s)
+	Z = Ze*(1 - chi_p)/(1 + chi_s)
 	Z *= 1e-3	
 	fig = plt.figure(figsize=(7,7))
         ax = fig.gca(projection='3d')

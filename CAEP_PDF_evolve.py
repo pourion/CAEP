@@ -110,9 +110,6 @@ class CAEP:
 		self.W = self.K*np.exp(2*self.cc*np.arctan((self.x - self.lamda)/self.aa))/(1 + ((self.x - self.lamda)/self.aa)**2)**self.nu
 		return self.W
 
-	def effective_cond(self, w=0):
-		b = -3*(self.sigma_e-self.sigma_c)*(self.eta - 1 + complex(0,1)*w*self.tau ) /(self.sigma_t*(self.eta + complex(0,1)*w*self.tau))
-		return 1 + b*self.phi/(1.0 - self.phi*(1 + b*self.sigma_e/(self.sigma_e-self.sigma_c)))
 
 	def get_pulse(self, t):
 		if self.test==0:
@@ -148,18 +145,9 @@ class CAEP:
 	def get_u(self, tnow, pbar):
 		# self.p_bar = self.calculate_p_bar()
 		E_ext = self.get_pulse(tnow)
-		nu = self.sigma_c/self.sigma_e
-		omega = 0.0
-		A = 1 + (self.phi*(1 - self.phi)/(2+nu + self.phi*(1-nu)))*(1-nu + 3*nu*self.eta/((2+self.phi)*(self.eta + omega*self.tau)))
-		E_e = E_ext/A
-		# self.u = self.sigma_e*E_e - 0.4*self.phi*pbar**3 - 0.2*self.phi*pbar**5
-		self.u = self.sigma_e*E_e #+ 5e-9*E_e**3 + 2e-10*E_e**5
-
-		# a = -3/(2+self.phi)/(self.eta + complex(0,1)*self.omega*self.tau )
-		# b = -3*(self.sigma_e-self.sigma_c)*(self.eta - 1 + complex(0,1)*self.omega*self.tau )/(self.sigma_t*(self.eta + complex(0,1)*self.omega*self.tau))
-		# chi_s = b*self.phi/(1 - self.phi*(1 + a + b*self.sigma_e/(self.sigma_e - self.sigma_c)))
-		# chi_p = a*self.phi/(1 - self.phi*(1 + a + b*self.sigma_e/(self.sigma_e - self.sigma_c)))
-		# self.u = self.sigma_e*E_ext + self.phi*pbar*(1.0 + abs(chi_s/chi_p))
+		alpha_p = -3/(2+self.phi)/(self.eta) # + complex(0,1)*omega*self.tau )
+		coeff = self.sigma_t/(2*self.sigma_e + self.sigma_c*(1 + alpha_p))
+		self.u = self.sigma_e*coeff*E_ext 
 		return self.u
 
 	def plot(self):
@@ -340,27 +328,28 @@ class CAEP:
 		plt.tight_layout()
 		plt.show()
 
-		# self.sigma_eff = self.effective_cond(2*np.pi*self.xf)
+
 		if self.test==1:
-			self.a = -3/(2+self.phi)/(self.eta + complex(0,1)*self.omega*self.tau )
-			self.b = -3*(self.sigma_e-self.sigma_c)*(self.eta - 1 + complex(0,1)*self.omega*self.tau )/(self.sigma_t*(self.eta + complex(0,1)*self.omega*self.tau))
+			self.alpha_p = -3/( (2+self.phi)*(self.eta + complex(0,1)*self.omega*self.tau) )
+			self.alpha_s = -3*(self.sigma_e-self.sigma_c)*(self.eta - 1 + complex(0,1)*self.omega*self.tau )/(self.sigma_t*(self.eta + complex(0,1)*self.omega*self.tau))
 		else:
-			self.a = -3/(2+self.phi)/(self.eta + complex(0,1)*2*np.pi*self.xf*self.tau )
-			self.b = -3*(self.sigma_e-self.sigma_c)*(self.eta - 1 + complex(0,1)*2*np.pi*self.xf*self.tau )/(self.sigma_t*(self.eta + complex(0,1)*2*np.pi*self.xf*self.tau))
+			self.alpha_p = -3/(2+self.phi)/(self.eta + complex(0,1)*2*np.pi*self.xf*self.tau )
+			self.alpha_s = -3*(self.sigma_e-self.sigma_c)*(self.eta - 1 + complex(0,1)*2*np.pi*self.xf*self.tau )/(self.sigma_t*(self.eta + complex(0,1)*2*np.pi*self.xf*self.tau))
 		
-		self.chi_s = self.b*self.phi/(1 - self.phi*(1 + self.a + self.b*self.sigma_e/(self.sigma_e - self.sigma_c)))
-		self.chi_p = self.a*self.phi/(1 - self.phi*(1 + self.a + self.b*self.sigma_e/(self.sigma_e - self.sigma_c)))
-		
+		self.chi_s = self.alpha_s*self.phi*self.sigma_t / (2*self.sigma_e + self.sigma_c*(1 + self.alpha_p))
+		self.chi_p = self.alpha_p*self.phi*self.sigma_t / (2*self.sigma_e + self.sigma_c*(1 + self.alpha_p)) 
+		Eavg = self.Eextf*(1 + self.chi_p)
 		area = 1.0e-6
 		H = 1.0e-3
 		Ze = self.sigma_e*area/H
 		self.Znormal = (self.sigma_e*self.Eextf)/(self.sigma_e*self.Eextf + self.phi*self.Pf + self.phi*self.Pf*self.chi_s/self.chi_p ) 
-		self.permittivity = ( self.phi*self.Pf + self.phi*self.Pf*self.chi_s/self.chi_p ) / ( complex(0,1) * 2 * np.pi * self.xf * self.Eextf )
-		self.permittivity /= self.permittivity_0
+		
+		self.permittivity = self.sigma_e*(self.chi_p + self.chi_s)
+		self.permittivity /= complex(0,1)*2*np.pi*self.xf*self.permittivity_0
 
 		fig, axes = plt.subplots(2, figsize=(7,7))
 		axes[0].plot(self.xf, np.real(self.permittivity), linewidth=2, color='k')
-		axes[1].plot(self.xf, np.imag(self.permittivity), linewidth=2, color='k')
+		axes[1].plot(self.xf, -np.imag(self.permittivity), linewidth=2, color='k')
 		axes[0].set_xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
 		axes[1].set_xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
 		axes[0].set_ylabel(r"$\rm \epsilon'$", fontsize=25)
@@ -377,8 +366,6 @@ class CAEP:
 		plt.ylabel(r"$\rm \epsilon''$", fontsize=25)
 		plt.tight_layout()
 		plt.show()
-
-
 
 		fig, axes = plt.subplots(2, figsize=(7,7))
 		axes[0].plot(self.xf, np.real(self.Znormal), linewidth=1, color='k')
@@ -446,10 +433,10 @@ class CAEP:
 			tau = Cm*sigma_t*R/((2 + phi)*sigma_e*sigma_c)
 			eta = 1 + SL*sigma_t*R/((2 + phi)*sigma_e*sigma_c)
 			freqs = np.logspace(4, 8, 200)
-			a = -3/(2+phi)/(eta + complex(0,1)*2*np.pi*freqs*tau )
-			b = -3*(sigma_e-sigma_c)*(eta - 1 + complex(0,1)*2*np.pi*freqs*tau )/(sigma_t*(eta + complex(0,1)*2*np.pi*freqs*tau))
-			chi_p = a*phi/(1 - phi*(1 + a + b*sigma_e/(sigma_e - sigma_c)))
-			chi_s = b*phi/(1 - phi*(1 + a + b*sigma_e/(sigma_e - sigma_c)))
+			alpha_p = -3/(2+phi)/(eta + complex(0,1)*2*np.pi*freqs*tau )
+			alpha_s = -3*(sigma_e - sigma_c)*(eta - 1 + complex(0,1)*2*np.pi*freqs*tau )/(sigma_t*(eta + complex(0,1)*2*np.pi*freqs*tau))
+			chi_p = alpha_p*phi*sigma_t / (2*sigma_e +(1+alpha_p)*sigma_c)
+			chi_s = alpha_s*phi*sigma_t / (2*sigma_e +(1+alpha_p)*sigma_c)
 			chi_p_store.append(chi_p)
 			chi_s_store.append(chi_s)
 
@@ -466,9 +453,9 @@ class CAEP:
 		plt.legend(fontsize=20, frameon=False)
 		plt.show()
 
-		E_avg = (1 + chi_p_store)
+		E_avg_Eext = (1 + chi_p_store)
 		plt.figure(figsize=(7,7))
-		for Evg, col, ln, phi in zip(E_avg, cols, lines, phis): plt.plot(freqs, abs(Evg), linewidth=2, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
+		for Evg, col, ln, phi in zip(E_avg_Eext, cols, lines, phis): plt.plot(freqs, abs(Evg), linewidth=2, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
 		plt.xscale('log')
 		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
 		plt.ylabel(r'$\rm \vert E_{avg.}\vert/\vert E_{ext}\vert$', fontsize=25)
@@ -478,24 +465,24 @@ class CAEP:
 		plt.show()
 
 
-testnum    =  5           # 6: smoothed step function, 5: Gaussian, 4: sharp step pulse, 3: relaxation test
-tf         =  2e-5	      # [s]
+testnum    =  4           # 6: smoothed step function, 5: Gaussian, 4: sharp step pulse, 3: relaxation test
+tf         =  2e-6	      # [s]
 eps        =  0.982       # eps = 1/(1 + a^2 /lamda^2)**0.5 = 0.982 
 xmin       = -5.0
 xmax       =  5.0
 nx         =  2000
-t_samples  =  20000
+t_samples  =  100000
 max_t_step =  1e-9
-sigma_e    =  1.3
-sigma_c    =  0.6
-phi        =  0.37 #0.13*(4*np.pi/3.0)*(5e-4)**3/(1e-9)
+sigma_e    =  15
+sigma_c    =  1
+phi        =  0.13*(4*np.pi/3.0)*(5e-4)**3/(1e-9)
 sep        =  CAEP(eps, sigma_e, sigma_c, xmin, xmax, testnum, tf, max_t_step, t_samples, nx, phi)
 
 sep.Solve()
 # sep.relaxation()
 # sep.evolution_pdf()
 # sep.statistics()
-sep.fourier_analysis()
+# sep.fourier_analysis()
 
 # pdb.set_trace()
 
