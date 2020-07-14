@@ -145,9 +145,14 @@ class CAEP:
 	def get_u(self, tnow, pbar):
 		# self.p_bar = self.calculate_p_bar()
 		E_ext = self.get_pulse(tnow)
-		alpha_p = -3/(2+self.phi)/(self.eta) # + complex(0,1)*omega*self.tau )
-		coeff = self.sigma_t/(2*self.sigma_e + self.sigma_c*(1 + alpha_p))
-		self.u = self.sigma_e*coeff*E_ext 
+		# alpha_p = -3/(2+self.phi)/(self.eta) 
+		# alpha_s = -3*((self.sigma_e - self.sigma_c)/self.sigma_t)* ((self.eta-1)/self.eta)
+		# alpha_e = (2*self.sigma_e + (1 + self.phi*alpha_p)*self.sigma_c)/self.sigma_t
+		# k = alpha_e - self.phi*alpha_p - self.phi*self.sigma_e*alpha_s/(self.sigma_e - self.sigma_c)
+		# self.u = self.sigma_e*E_ext/k 
+
+		nu = self.sigma_c/self.sigma_e
+		self.u = (self.sigma_t*E_ext - nu*self.phi**2*pbar)/(2 + 3*self.phi + nu)
 		return self.u
 
 	def plot(self):
@@ -279,6 +284,54 @@ class CAEP:
 		plt.tight_layout()
 		plt.show()
 
+
+
+	def time_domain_analysis(self):
+		mus = self.mus 
+		var_p  = self.sigma2s
+		Es  = self.Es
+		times = self.times
+		nu = self.sigma_c/self.sigma_e
+		area = 1 # mm^2
+		H = 1 #mm
+
+		s_t = -3*((self.sigma_e - self.sigma_c)/self.sigma_t) * (self.sigma_e*Es + (2+ self.phi)*mus/3)
+		E_t = (self.sigma_t*Es - nu*self.phi**2*mus)/((2+3*self.phi)*self.sigma_e + self.sigma_c)
+		E_avg = Es + self.phi*mus/self.sigma_e
+		J_t = self.sigma_e*Es*(2 + nu*(3*self.phi + 1))/(3*self.phi + nu + 2) + 3*nu*self.phi*mus*( (1-nu)*self.phi**2 + 3*self.phi + 2 )/(3*self.phi + nu + 2)/(2 + nu + self.phi*(1 - nu))
+		sigma_bar_per_sigma_e_t = J_t/(self.sigma_e*E_avg)
+		Resistance = H*Es/(area*J_t)
+
+		fig, ax = plt.subplots(2, figsize=(7,7))
+		ax[0].plot(1e6*times, Es/10, linewidth=1, color='b', linestyle='-.', label=r'$\rm E_{ext}/10\ [kV/m]$')
+		ax[0].plot(1e6*times, E_avg/10, linewidth=1, color='g', linestyle='--', label=r'$\rm E_{avg.}/10\ [kV/m]$')
+		ax[0].plot(1e6*times, sigma_bar_per_sigma_e_t, linewidth=1, color='r', linestyle=':', label=r'$\rm  \bar{\sigma}(t)/\sigma_e$')
+		ax[0].plot(1e6*times, Resistance*1e-3, linewidth=1, color='k', linestyle='-', label=r'$\rm R(t)\ [k\Omega]$')
+		ymin0 = np.min([np.min(Es/10), np.min(E_avg/10), np.min(sigma_bar_per_sigma_e_t), np.min(Resistance*1e-3)])
+		ymax0 = np.max([np.max(Es/10), np.max(E_avg/10), np.max(sigma_bar_per_sigma_e_t), np.max(Resistance*1e-3)])
+		ax[0].set_ylim([1.1*ymin0, 1.1*ymax0])
+
+		ax[1].plot(1e6*times, s_t, linewidth=1, color='b', linestyle='-.', label=r'$\rm s(t)\ [A/mm^2]$')
+		ax[1].plot(1e6*times, mus, linewidth=1, color='g', linestyle='--', label=r'$\rm p(t)\ [A/mm^2]$')
+		ax[1].plot(1e6*times, var_p, linewidth=1, color='r', linestyle=':', label=r'$\rm var(p)(t)\ [A^2/mm^4]$')
+		ax[1].plot(1e6*times, J_t*area, linewidth=1, color='k', linestyle='-', label=r'$\rm I(t)\ [A]$')
+		ymin1 = np.min([np.min(s_t), np.min(mus), np.min(var_p), np.min(J_t*area)])
+		ymax1 = np.max([np.max(s_t), np.max(mus), np.max(var_p), np.max(J_t*area)])
+		ax[1].set_ylim([1.1*ymin1, 1.1*ymax1])
+
+		ax[0].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
+		ax[1].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
+		ax[0].set_ylabel(r'$\rm value$', fontsize=25)
+		ax[1].set_ylabel(r'$\rm value$', fontsize=25)
+		ax[0].legend(fontsize=12, frameon=False)
+		ax[1].legend(fontsize=12, frameon=False)
+		plt.tight_layout()
+		plt.show()
+		pdb.set_trace()
+
+
+
+
 	def fourier_analysis(self):
 		indices = self.times > 0
 		mus = self.mus[indices]
@@ -336,8 +389,13 @@ class CAEP:
 			self.alpha_p = -3/(2+self.phi)/(self.eta + complex(0,1)*2*np.pi*self.xf*self.tau )
 			self.alpha_s = -3*(self.sigma_e-self.sigma_c)*(self.eta - 1 + complex(0,1)*2*np.pi*self.xf*self.tau )/(self.sigma_t*(self.eta + complex(0,1)*2*np.pi*self.xf*self.tau))
 		
-		self.chi_s = self.alpha_s*self.phi*self.sigma_t / (2*self.sigma_e + self.sigma_c*(1 + self.alpha_p))
-		self.chi_p = self.alpha_p*self.phi*self.sigma_t / (2*self.sigma_e + self.sigma_c*(1 + self.alpha_p)) 
+
+		self.alpha_e = (2*self.sigma_e + (1 + self.phi*self.alpha_p)*self.sigma_c)/self.sigma_t
+		self.k = self.alpha_e - self.phi*self.alpha_p - self.phi*self.sigma_e*self.alpha_s/(self.sigma_e - self.sigma_c)
+
+
+		self.chi_s = self.alpha_s*self.phi / self.k
+		self.chi_p = self.alpha_p*self.phi / self.k
 		Eavg = self.Eextf*(1 + self.chi_p)
 		area = 1.0e-6
 		H = 1.0e-3
@@ -418,16 +476,18 @@ class CAEP:
 			pass
 
 	def statistics(self):
-		phis = np.array([0.1, 0.25, 0.35, 0.65])
-		cols = ['b', 'c', 'm', 'red']
-		lines = [':', '-.', '--', '-'] 
+		phis = np.array([0.1, 0.15, 0.25, 0.35, 0.5, 0.65])
+		cols = ['darkblue', 'b', 'c', 'g', 'm', 'red']
+		lines = ['--', ':', '-', '-.', '--', '-'] 
 		R = 7e-6
 		Cm = 0.01
 		SL = 1.9
 		sigma_e = 15.0
 		sigma_c = 1.0
+		
 		chi_p_store = []
 		chi_s_store = []
+		E_e_Eext_store = []
 		for phi in phis:
 			sigma_t = 2*sigma_e + sigma_c + phi*(sigma_e - sigma_c)
 			tau = Cm*sigma_t*R/((2 + phi)*sigma_e*sigma_c)
@@ -435,15 +495,22 @@ class CAEP:
 			freqs = np.logspace(4, 8, 200)
 			alpha_p = -3/(2+phi)/(eta + complex(0,1)*2*np.pi*freqs*tau )
 			alpha_s = -3*(sigma_e - sigma_c)*(eta - 1 + complex(0,1)*2*np.pi*freqs*tau )/(sigma_t*(eta + complex(0,1)*2*np.pi*freqs*tau))
-			chi_p = alpha_p*phi*sigma_t / (2*sigma_e +(1+alpha_p)*sigma_c)
-			chi_s = alpha_s*phi*sigma_t / (2*sigma_e +(1+alpha_p)*sigma_c)
+			alpha_e = (2*sigma_e + (1 + phi*alpha_p)*sigma_c)/sigma_t
+			k = alpha_e - phi*alpha_p - phi*sigma_e*alpha_s/(sigma_e - sigma_c)
+			chi_p = alpha_p*phi/k
+			chi_s = alpha_s*phi/k
 			chi_p_store.append(chi_p)
 			chi_s_store.append(chi_s)
-
+			E_e_Eext = alpha_e/(k*(1-phi))
+			E_e_Eext_store.append(E_e_Eext)
 		chi_p_store = np.array(chi_p_store)
 		chi_s_store = np.array(chi_s_store)
+		E_e_Eext_store = np.array(E_e_Eext_store)
+		E_avg_Eext = 1 + chi_p_store
+		sigma_eff = 1 + chi_s_store/ (1 + chi_p_store)  
+
 		plt.figure(figsize=(7,7))
-		for chip, col, ln, phi in zip(chi_p_store, cols, lines, phis): plt.plot(freqs, abs(chip), linewidth=2, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
+		for chip, col, ln, phi in zip(chi_p_store, cols, lines, phis): plt.plot(freqs, abs(chip), linewidth=1, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
 		plt.xscale('log')
 		plt.yscale('log')
 		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
@@ -452,13 +519,64 @@ class CAEP:
 		plt.tight_layout()
 		plt.legend(fontsize=20, frameon=False)
 		plt.show()
-
-		E_avg_Eext = (1 + chi_p_store)
+		
 		plt.figure(figsize=(7,7))
-		for Evg, col, ln, phi in zip(E_avg_Eext, cols, lines, phis): plt.plot(freqs, abs(Evg), linewidth=2, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
+		for Evg, col, ln, phi in zip(E_avg_Eext, cols, lines, phis): plt.plot(freqs, abs(Evg), linewidth=1, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
 		plt.xscale('log')
 		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
 		plt.ylabel(r'$\rm \vert E_{avg.}\vert/\vert E_{ext}\vert$', fontsize=25)
+		plt.ylim([-0.05,1.1])
+		plt.legend(fontsize=20, frameon=False, loc=4)
+		plt.tight_layout()
+		plt.show()
+
+		plt.figure(figsize=(7,7))
+		for Ee, col, ln, phi in zip(E_e_Eext_store, cols, lines, phis): plt.plot(freqs, abs(Ee), linewidth=1, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
+		plt.xscale('log')
+		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
+		plt.ylabel(r'$\rm \vert E_{e}\vert/\vert E_{ext}\vert$', fontsize=25)
+		plt.ylim([0.9,1.5])
+		plt.legend(fontsize=20, frameon=False)#, loc=4)
+		plt.tight_layout()
+		plt.show()
+
+		plt.figure(figsize=(7,7))
+		for siff, col, ln, phi in zip(sigma_eff, cols, lines, phis): plt.plot(freqs, abs(siff), linewidth=1, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
+		plt.xscale('log')
+		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
+		plt.ylabel(r'$\rm \vert \bar{\sigma}/ \sigma_e \vert$', fontsize=25)
+		plt.ylim([-0.05,1.1])
+		plt.legend(fontsize=20, frameon=False, loc=4)
+		plt.tight_layout()
+		plt.show()
+
+
+		## Now choose 6 frequencies and vary phi continuously
+		chi_p_store_2 = []
+		chi_s_store_2 = []
+		freqs_2 = [1e4, 1e5, 1e6, 2e6, 1e7, 1e8]
+		labels = [r'$10^4\ [Hz]$', r'$10^5\ [Hz]$', r'$10^6\ [Hz]$', r'$2\times 10^6\ [Hz]$', r'$10^7\ [Hz]$', r'$10^8\ [Hz]$']
+		phis = np.linspace(0, 1, 100)
+		for freq in freqs_2:
+			sigma_t = 2*sigma_e + sigma_c + phis*(sigma_e - sigma_c)
+			tau = Cm*sigma_t*R/((2 + phis)*sigma_e*sigma_c)
+			eta = 1 + SL*sigma_t*R/((2 + phis)*sigma_e*sigma_c)
+			alpha_p = -3/(2+phis)/(eta + complex(0,1)*2*np.pi*freq*tau )
+			alpha_s = -3*(sigma_e - sigma_c)*(eta - 1 + complex(0,1)*2*np.pi*freq*tau )/(sigma_t*(eta + complex(0,1)*2*np.pi*freq*tau))
+			alpha_e = (2*sigma_e + (1 + phis*alpha_p)*sigma_c)/sigma_t
+			k = alpha_e - phis*alpha_p - phis*sigma_e*alpha_s/(sigma_e - sigma_c)
+			chi_p = alpha_p*phis/k
+			chi_s = alpha_s*phis/k
+			chi_p_store_2.append(chi_p)
+			chi_s_store_2.append(chi_s)
+		chi_p_store_2 = np.array(chi_p_store_2)
+		chi_s_store_2 = np.array(chi_s_store_2)
+		E_avg_Eext_2 = (1 + chi_p_store_2)
+		sigma_eff_2 = 1 + chi_s_store_2/ (1 + chi_p_store_2)
+		plt.figure(figsize=(7,7))
+		for siff, col, ln, lab in zip(sigma_eff_2, cols, lines, labels): plt.plot(phis, abs(siff), linewidth=1, c=col, linestyle=ln, label=r'$\rm f=$'+lab)
+		plt.xlabel(r'$\rm \phi$', fontsize=25)
+		plt.ylabel(r'$\rm \vert \bar{\sigma}/ \sigma_e \vert$', fontsize=25)
 		plt.ylim([-0.05,1.1])
 		plt.legend(fontsize=20, frameon=False, loc=4)
 		plt.tight_layout()
@@ -482,6 +600,7 @@ sep.Solve()
 # sep.relaxation()
 # sep.evolution_pdf()
 # sep.statistics()
+sep.time_domain_analysis()
 # sep.fourier_analysis()
 
 # pdb.set_trace()
