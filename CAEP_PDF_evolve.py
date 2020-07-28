@@ -14,12 +14,14 @@ from scipy.integrate import solve_ivp
 from astroML.plotting import setup_text_plots
 setup_text_plots(fontsize=15, usetex=True)
 import scipy.fftpack
+import h5py
+from scipy import special
 
 def sigmoid(x):
   return 1 / (1 + np.exp(-x))
 
 class CAEP:
-	def __init__(self, epsilon, sigma_e, sigma_c, xmin, xmax, testnum, tf, maxstep =2e-9, eval_points=1000, Nx=2000, phi=0.13):
+	def __init__(self, epsilon, sigma_e, sigma_c, SL, xmin, xmax, testnum, tf, maxstep =2e-9, eval_points=1000, Nx=2000, phi=0.13):
 		self.animate = False
 		self.verbose = False
 		self.test    = testnum
@@ -37,32 +39,39 @@ class CAEP:
 		self.sigma_e = sigma_e*self.scaling      #15                       # S/mm
 		self.sigma_c = sigma_c*self.scaling      #1                 # S/mm
 		self.Cm      = 0.00983*self.scaling**2                      # F/mm^2
-		self.SL      = 1.9*self.scaling**2                       # S/mm^2
-		self.R       = 7.0e-6/self.scaling                       # mm
-		self.phi     = phi
-
-		self.sigma_t = 2*self.sigma_e + self.sigma_c + self.phi*(self.sigma_e - self.sigma_c)
-		self.alpha_b = 3*self.sigma_e*self.sigma_c/(self.Cm*self.R*self.sigma_t)
-		self.gamma_b = self.SL/self.Cm + ( self.sigma_e * self.sigma_c * (2 + self.phi))/(self.R*self.Cm*self.sigma_t) 
-
+		self.SL      = SL*self.scaling**2                       # S/mm^2
+		self.h       = 5e-9/self.scaling
+		self.sigma_m = self.h*self.SL
+		
+		
+		if self.test != 4:
+			self.R       = 7e-6/self.scaling                       # mm
+			self.phi     = phi
+			self.sigma_t = 2*self.sigma_e + self.sigma_c + self.phi*(self.sigma_e - self.sigma_c)
+			self.alpha_b = 3*self.sigma_e*self.sigma_c/(self.Cm*self.R*self.sigma_t)
+			self.gamma_b = self.SL/self.Cm + ( self.sigma_e * self.sigma_c * (2 + self.phi))/(self.R*self.Cm*self.sigma_t) 
+			self.eta     = 1 + self.SL*self.sigma_t*self.R/((2 + self.phi)*self.sigma_e*self.sigma_c)
+			self.tau     = self.Cm*self.sigma_t*self.R/((2 + self.phi)*self.sigma_e*self.sigma_c)
+			self.omega   = 2.0*np.pi*1e6
+		else:
+			self.load_simulation_data()
+			self.alpha_b = np.median(self.sim_alphas)
+			self.gamma_b = np.median(self.sim_gammas)
+			self.R       = 3*self.sigma_e*self.sigma_c/(self.alpha_b*self.Cm*self.sigma_t) 
+			self.eta     = 1 + self.SL*self.sigma_t*self.R/((2 + self.phi)*self.sigma_e*self.sigma_c)
+			self.tau     = self.Cm*self.sigma_t*self.R/((2 + self.phi)*self.sigma_e*self.sigma_c)
+			self.omega   = 0.0
+			# self.plot_simulation_data()
 		# experiments
-		self.nu_exp = 7.246803016058461
-		self.cc_exp = 0.8884126275039926
-		self.aa_exp = 0.1635772557705042
-		self.lamda_exp = 0.8644983717186614
+		self.nu_exp    =  7.246803016058461
+		self.cc_exp    =  0.8884126275039926
+		self.aa_exp    =  0.1635772557705042
+		self.lamda_exp = -0.8644983717186614
 		self.gamma_p = np.sqrt(self.gamma_b/(self.nu_exp - 0.5))
 		self.epsilon = 1.0/np.sqrt(1.0 + self.aa_exp**2/self.lamda_exp**2)
 		self.alpha_p = self.alpha_b*self.gamma_p/(self.epsilon*self.gamma_b - self.cc_exp*self.gamma_p**2*np.sqrt(1 - self.epsilon**2))
 		self.u_exp   = -self.lamda_exp*self.gamma_p/(self.epsilon*self.alpha_p)
-
-		# stochastic parameters
-		# self.epsilon = epsilon                          # correlation between alpha and gamma \in [-1, 1]
-		# self.gamma_p = gamma_p #np.sqrt(gm_factor*self.gamma_b)  # noise in gamma       
-		# self.alpha_p = alpha_p #np.sqrt(ap_factor*self.alpha_b)  #*self.alpha_b*(self.gamma_p/self.gamma_b)/self.epsilon  
-
-		self.eta     = 1 + self.SL*self.sigma_t*self.R/((2 + self.phi)*self.sigma_e*self.sigma_c)
-		self.tau     = self.Cm*self.sigma_t*self.R/((2 + self.phi)*self.sigma_e*self.sigma_c)
-		self.omega   = 2.0*np.pi*1e6
+		
 		# a = -3/((2+self.phi)*(self.eta + complex(0,1)*self.omega*self.tau))
 		# b = -3*(self.sigma_e-self.sigma_c)*(self.eta-1+complex(0,1)*self.omega*self.tau)/((self.sigma_t)*(self.eta+complex(0,1)*self.omega*self.tau))
 		# self.chi_p   = a*self.phi
@@ -110,7 +119,6 @@ class CAEP:
 		self.W = self.K*np.exp(2*self.cc*np.arctan((self.x - self.lamda)/self.aa))/(1 + ((self.x - self.lamda)/self.aa)**2)**self.nu
 		return self.W
 
-
 	def get_pulse(self, t):
 		if self.test==0:
 			return self.E0
@@ -145,15 +153,12 @@ class CAEP:
 	def get_u(self, tnow, pbar):
 		# self.p_bar = self.calculate_p_bar()
 		E_ext = self.get_pulse(tnow)
-		# alpha_p = -3/(2+self.phi)/(self.eta) 
-		# alpha_s = -3*((self.sigma_e - self.sigma_c)/self.sigma_t)* ((self.eta-1)/self.eta)
-		# alpha_e = (2*self.sigma_e + (1 + self.phi*alpha_p)*self.sigma_c)/self.sigma_t
-		# k = alpha_e - self.phi*alpha_p - self.phi*self.sigma_e*alpha_s/(self.sigma_e - self.sigma_c)
-		# self.u = self.sigma_e*E_ext/k 
-
 		nu = self.sigma_c/self.sigma_e
-		self.u = (self.sigma_t*E_ext - nu*self.phi**2*pbar)/(2 + 3*self.phi + nu)
+		phi = self.phi
+		k = (2 + 3*phi + nu)/(2 + nu + phi*(1-nu)) - 3*phi**2*nu/( (2+ phi)*self.eta*(2 + nu + phi*(1-nu)) )
+		self.u = self.sigma_e*E_ext/k
 		return self.u
+
 
 	def plot(self):
 		plt.figure(figsize=(7,7))
@@ -175,26 +180,75 @@ class CAEP:
 		self.get_PDF()
 		self.print_params(t, un)
 
-
 	def dmu_sigma2(self, t, y):
 		self.update_params(t, y[0], y[1])
 		u       =  self.get_u(t, y[0])
-		dmu     = -self.gamma_b*y[0] - self.alpha_b*u + 0.5*self.gamma_p**2*y[0] + 0.5*self.epsilon*self.alpha_p*self.gamma_p*u
+		dmu     = -self.gamma_b*y[0] - self.alpha_b*u + self.gamma_p**2*y[0] + self.epsilon*self.alpha_p*self.gamma_p*u
 		dsigma2 = -2*(self.gamma_b - self.gamma_p**2)*y[1] + self.gamma_p**2*y[0]**2 + 2*self.epsilon*self.gamma_p*self.alpha_p*u*y[0] + self.alpha_p**2*u**2
+		# g3      = -0.1*self.gamma_b
+		# dmu    += g3*y[0]**3 + 3*g3*y[0]*y[1]
+		# dsigma2+= 6*g3*y[0]**2*y[1]
 		return [dmu, dsigma2]
 
 	def jacob(self, t,y):
 		return np.array([[-self.gamma_b + 0.5*self.gamma_p**2, 0], [2*self.gamma_p**2*y[0]+2*self.epsilon*self.gamma_p*self.alpha_p*self.get_u(t,y[0]), -4*(self.gamma_b-self.gamma_p**2)*np.sqrt(y[1]) ] ])
 
-	def Solve(self):
+	def caputoEuler(self, a, f, y0, tspan):
+		"""Use one-step Adams-Bashforth (Euler) method to integrate Caputo equation
+		D^a y(t) = f(y,t)
+
+		Args:
+		a: fractional exponent in the range (0,1)
+		f: callable(y,t) returning a numpy array of shape (d,)
+			Vector-valued function to define the right hand side of the system
+		y0: array of shape (d,) giving the initial state vector y(t==0)
+		tspan (array): The sequence of time points for which to solve for y.
+			These must be equally spaced, e.g. np.arange(0,10,0.005)
+			tspan[0] is the intial time corresponding to the initial state y0.
+
+		Returns:
+		y: array, with shape (len(tspan), len(y0))
+			With the initial value y0 in the first row
+
+		See also:
+		K. Diethelm et al. (2004) Detailed error analysis for a fractional Adams
+		method
+		C. Li and F. Zeng (2012) Finite Difference Methods for Fractional
+		Differential Equations
+		"""
+		d = len(y0)
+		N = len(tspan)
+		h = (tspan[N-1] - tspan[0])/(N - 1)
+		c = special.rgamma(a) * np.power(h, a) / a
+		w = c * np.diff(np.power(np.arange(N), a))
+		fhistory = np.zeros((N - 1, d), dtype=type(y0[0]))
+		y = np.zeros((N, d), dtype=type(y0[0]))
+		y[0] = y0
+		for n in range(0, N - 1):
+			tn = tspan[n]
+			yn = y[n]
+			fhistory[n] = f(tn, yn)
+			y[n+1] = y0 + np.dot(w[0:n+1], fhistory[n::-1])
+		return y
+
+	def Solve(self, fraction=1):
 		self.t_evaluation = np.linspace(0, self.tfinal, self.eval_point)
 		y0 = [self.mu_ini, self.sigma2_ini]
-		self.sol = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob, max_step=self.maxstep, t_eval=self.t_evaluation) 
-		self.times   = self.sol.t
-		self.mus     = self.sol.y[0]
-		self.sigma2s = self.sol.y[1]
+		if fraction!=1:
+			self.sol     = self.caputoEuler(fraction, self.dmu_sigma2, y0, self.t_evaluation)
+			self.times   = self.t_evaluation
+			self.mus     = self.sol[:,0]
+			self.sigma2s = self.sol[:,1]
+		else:
+			self.sol = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob, max_step=self.maxstep, t_eval=self.t_evaluation) 
+			self.times   = self.sol.t
+			self.mus     = self.sol.y[0]
+			self.sigma2s = self.sol.y[1]
+
+
 		self.Es = np.array([self.get_pulse(t) for t in self.times])
 		
+
 		if self.test==4:
 			data_sim = np.loadtxt("data_time_mean_variance_ps.dat")
 			fig, ax = plt.subplots(1, 2, figsize=(15,7))
@@ -268,7 +322,23 @@ class CAEP:
 			plt.legend(frameon=False, fontsize=20)
 			plt.tight_layout()
 			plt.show()
+
 			self.W_store = np.array(self.W_store)
+			self.aa_store = np.array(self.aa_store)
+			self.nu_store = np.array(self.nu_store)
+			self.cc_store = np.array(self.cc_store)
+			# moms = []
+			# moms.append( np.array(len(self.mus)*[1]) )
+			# moms.append( np.array(len(self.mus)*[0]) )
+			# for n in range(2,11):
+			# 	tmp = ( (n-1)*self.aa_store/( (self.nu_store-1)**2 * (2*(self.nu_store-1) - (n-1)) ) ) * ( (self.nu_store-1)*self.cc_store*moms[n-1] + self.aa_store*moms[n-2]*((self.nu_store-1)**2 + self.cc_store**2) ) 
+			# 	moms.append(np.array(tmp))
+			# pdb.set_trace()
+
+
+
+
+
 
 	def evolution_pdf(self):
 		X, T = np.meshgrid(-self.x, 1e6*self.times)
@@ -287,38 +357,35 @@ class CAEP:
 
 
 	def time_domain_analysis(self):
-		mus = self.mus 
-		var_p  = self.sigma2s
-		Es  = self.Es
-		times = self.times
-		nu = self.sigma_c/self.sigma_e
+		mus  = self.mus 
+		var_p= self.sigma2s
+		Es   = self.Es 
+		times= self.times
+		nu   = self.sigma_c/self.sigma_e
 		area = 1 # mm^2
-		H = 1 #mm
+		H    = 1 #mm
 
-		s_t = -3*((self.sigma_e - self.sigma_c)/self.sigma_t) * (self.sigma_e*Es + (2+ self.phi)*mus/3)
 		E_t = (self.sigma_t*Es - nu*self.phi**2*mus)/((2+3*self.phi)*self.sigma_e + self.sigma_c)
-		E_avg = Es + self.phi*mus/self.sigma_e
-		J_t = self.sigma_e*Es*(2 + nu*(3*self.phi + 1))/(3*self.phi + nu + 2) + 3*nu*self.phi*mus*( (1-nu)*self.phi**2 + 3*self.phi + 2 )/(3*self.phi + nu + 2)/(2 + nu + self.phi*(1 - nu))
-		sigma_bar_per_sigma_e_t = J_t/(self.sigma_e*E_avg)
+		s_t = -3*((self.sigma_e - self.sigma_c)/self.sigma_t) * (self.sigma_e*E_t + (2+ self.phi)*mus/3)
+		J_t = self.sigma_e*Es + self.phi*s_t + self.phi*mus*(1-self.sigma_m/self.sigma_e) 
+		sigma_bar_per_sigma_e_t = J_t/(self.sigma_e*Es)
 		Resistance = H*Es/(area*J_t)
 
 		fig, ax = plt.subplots(2, figsize=(7,7))
-		ax[0].plot(1e6*times, Es/10, linewidth=1, color='b', linestyle='-.', label=r'$\rm E_{ext}/10\ [kV/m]$')
-		ax[0].plot(1e6*times, E_avg/10, linewidth=1, color='g', linestyle='--', label=r'$\rm E_{avg.}/10\ [kV/m]$')
+		ax[0].plot(1e6*times, Es/40.0, linewidth=1, color='b', linestyle='-.', label=r'$\rm E_{ext}/40\ [kV/m]$')
 		ax[0].plot(1e6*times, sigma_bar_per_sigma_e_t, linewidth=1, color='r', linestyle=':', label=r'$\rm  \bar{\sigma}(t)/\sigma_e$')
-		ax[0].plot(1e6*times, Resistance*1e-3, linewidth=1, color='k', linestyle='-', label=r'$\rm R(t)\ [k\Omega]$')
-		ymin0 = np.min([np.min(Es/10), np.min(E_avg/10), np.min(sigma_bar_per_sigma_e_t), np.min(Resistance*1e-3)])
-		ymax0 = np.max([np.max(Es/10), np.max(E_avg/10), np.max(sigma_bar_per_sigma_e_t), np.max(Resistance*1e-3)])
+		ax[0].plot(1e6*times, Resistance/1000.0, linewidth=1, color='k', linestyle='-', label=r'$\rm R(t)\ [k\Omega]$')
+		ymin0 = np.min([np.min(Es/40.0), np.min(sigma_bar_per_sigma_e_t), np.min(Resistance/1000)])
+		ymax0 = np.max([np.max(Es/40.0), np.max(sigma_bar_per_sigma_e_t), np.max(Resistance/1000)])
 		ax[0].set_ylim([1.1*ymin0, 1.1*ymax0])
-
+		# ax[0].set_ylim([0,1.1])
 		ax[1].plot(1e6*times, s_t, linewidth=1, color='b', linestyle='-.', label=r'$\rm s(t)\ [A/mm^2]$')
 		ax[1].plot(1e6*times, mus, linewidth=1, color='g', linestyle='--', label=r'$\rm p(t)\ [A/mm^2]$')
-		ax[1].plot(1e6*times, var_p, linewidth=1, color='r', linestyle=':', label=r'$\rm var(p)(t)\ [A^2/mm^4]$')
+		ax[1].plot(1e6*times, var_p*10, linewidth=1, color='r', linestyle=':', label=r'$\rm var(p)(t)\times 10\ [A^2/mm^4]$')
 		ax[1].plot(1e6*times, J_t*area, linewidth=1, color='k', linestyle='-', label=r'$\rm I(t)\ [A]$')
-		ymin1 = np.min([np.min(s_t), np.min(mus), np.min(var_p), np.min(J_t*area)])
-		ymax1 = np.max([np.max(s_t), np.max(mus), np.max(var_p), np.max(J_t*area)])
+		ymin1 = np.min([np.min(s_t), np.min(mus), np.min(var_p*10), np.min(J_t*area)])
+		ymax1 = np.max([np.max(s_t), np.max(mus), np.max(var_p*10), np.max(J_t*area)])
 		ax[1].set_ylim([1.1*ymin1, 1.1*ymax1])
-
 		ax[0].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 		ax[1].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 		ax[0].set_ylabel(r'$\rm value$', fontsize=25)
@@ -327,9 +394,6 @@ class CAEP:
 		ax[1].legend(fontsize=12, frameon=False)
 		plt.tight_layout()
 		plt.show()
-		pdb.set_trace()
-
-
 
 
 	def fourier_analysis(self):
@@ -349,6 +413,31 @@ class CAEP:
 		Ef = scipy.fftpack.fft(Es)
 		self.Eextf = (2.0/N) * Ef[:N//2]
 		self.Ef = (2.0/N) * np.abs(Ef[:N//2])
+
+		if self.test==1:
+			self.alpha_p = -3/( (2+self.phi)*(self.eta + complex(0,1)*self.omega*self.tau) )
+			self.alpha_s = -3*(self.sigma_e-self.sigma_c)*(self.eta - 1 + complex(0,1)*self.omega*self.tau )/(self.sigma_t*(self.eta + complex(0,1)*self.omega*self.tau))
+		else:
+			self.alpha_p = -3/(2+self.phi)/(self.eta + complex(0,1)*2*np.pi*self.xf*self.tau )
+			self.alpha_s = -3*(self.sigma_e-self.sigma_c)*(self.eta - 1 + complex(0,1)*2*np.pi*self.xf*self.tau )/(self.sigma_t*(self.eta + complex(0,1)*2*np.pi*self.xf*self.tau))
+		
+
+		self.alpha_e = (2*self.sigma_e + (1 + self.phi*self.alpha_p)*self.sigma_c)/self.sigma_t
+		self.k = self.alpha_e - self.phi*self.alpha_p - self.phi*self.sigma_e*self.alpha_s/(self.sigma_e - self.sigma_c)
+
+
+		self.chi_s = self.alpha_s*self.phi / self.k
+		self.chi_p = self.alpha_p*self.phi / self.k
+		Eavg = self.Eextf
+		area = 1.0 # mm^2
+		H    = 1.0    # mm
+		Ze   = self.sigma_e*area/H
+		self.Znormal = (self.sigma_e*self.Eextf)/(self.sigma_e*self.Eextf + self.phi*self.Pf*(1-self.sigma_m/self.sigma_e) + self.phi*self.Pf*self.chi_s/self.chi_p ) 
+		
+		self.permittivity = self.sigma_e*(self.chi_p*(1-self.sigma_m/self.sigma_e) + self.chi_s)
+		self.permittivity /= complex(0,1)*2*np.pi*self.xf*self.permittivity_0
+
+
 
 		plt.figure(figsize=(7,7))
 		plt.plot(self.mus, self.Es, color='k', linewidth=1)
@@ -380,30 +469,6 @@ class CAEP:
 		plt.xscale('log')
 		plt.tight_layout()
 		plt.show()
-
-
-		if self.test==1:
-			self.alpha_p = -3/( (2+self.phi)*(self.eta + complex(0,1)*self.omega*self.tau) )
-			self.alpha_s = -3*(self.sigma_e-self.sigma_c)*(self.eta - 1 + complex(0,1)*self.omega*self.tau )/(self.sigma_t*(self.eta + complex(0,1)*self.omega*self.tau))
-		else:
-			self.alpha_p = -3/(2+self.phi)/(self.eta + complex(0,1)*2*np.pi*self.xf*self.tau )
-			self.alpha_s = -3*(self.sigma_e-self.sigma_c)*(self.eta - 1 + complex(0,1)*2*np.pi*self.xf*self.tau )/(self.sigma_t*(self.eta + complex(0,1)*2*np.pi*self.xf*self.tau))
-		
-
-		self.alpha_e = (2*self.sigma_e + (1 + self.phi*self.alpha_p)*self.sigma_c)/self.sigma_t
-		self.k = self.alpha_e - self.phi*self.alpha_p - self.phi*self.sigma_e*self.alpha_s/(self.sigma_e - self.sigma_c)
-
-
-		self.chi_s = self.alpha_s*self.phi / self.k
-		self.chi_p = self.alpha_p*self.phi / self.k
-		Eavg = self.Eextf*(1 + self.chi_p)
-		area = 1.0e-6
-		H = 1.0e-3
-		Ze = self.sigma_e*area/H
-		self.Znormal = (self.sigma_e*self.Eextf)/(self.sigma_e*self.Eextf + self.phi*self.Pf + self.phi*self.Pf*self.chi_s/self.chi_p ) 
-		
-		self.permittivity = self.sigma_e*(self.chi_p + self.chi_s)
-		self.permittivity /= complex(0,1)*2*np.pi*self.xf*self.permittivity_0
 
 		fig, axes = plt.subplots(2, figsize=(7,7))
 		axes[0].plot(self.xf, np.real(self.permittivity), linewidth=2, color='k')
@@ -482,12 +547,15 @@ class CAEP:
 		R = 7e-6
 		Cm = 0.01
 		SL = 1.9
-		sigma_e = 15.0
-		sigma_c = 1.0
+		sigma_e = 1.3
+		sigma_c = 0.6
+		h = 5e-9
+		sigma_m = SL*h
 		
 		chi_p_store = []
 		chi_s_store = []
 		E_e_Eext_store = []
+		E_Eext_store = []
 		for phi in phis:
 			sigma_t = 2*sigma_e + sigma_c + phi*(sigma_e - sigma_c)
 			tau = Cm*sigma_t*R/((2 + phi)*sigma_e*sigma_c)
@@ -499,15 +567,21 @@ class CAEP:
 			k = alpha_e - phi*alpha_p - phi*sigma_e*alpha_s/(sigma_e - sigma_c)
 			chi_p = alpha_p*phi/k
 			chi_s = alpha_s*phi/k
+			E_e_Eext = alpha_e/(k*(1-phi))
+			E_Eext = 1.0/k
 			chi_p_store.append(chi_p)
 			chi_s_store.append(chi_s)
-			E_e_Eext = alpha_e/(k*(1-phi))
 			E_e_Eext_store.append(E_e_Eext)
+			E_Eext_store.append(E_Eext)
+
 		chi_p_store = np.array(chi_p_store)
 		chi_s_store = np.array(chi_s_store)
 		E_e_Eext_store = np.array(E_e_Eext_store)
-		E_avg_Eext = 1 + chi_p_store
-		sigma_eff = 1 + chi_s_store/ (1 + chi_p_store)  
+		E_Eext_store = np.array(E_Eext_store)
+
+		phi_theta_1 = (chi_p_store*(1 - sigma_m/sigma_e) + chi_s_store)/3.0 
+		sigma_eff_per_sigma_e = 1 + 3*phi_theta_1 + 3*phi_theta_1**2/(1 - phi_theta_1)
+
 
 		plt.figure(figsize=(7,7))
 		for chip, col, ln, phi in zip(chi_p_store, cols, lines, phis): plt.plot(freqs, abs(chip), linewidth=1, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
@@ -521,10 +595,10 @@ class CAEP:
 		plt.show()
 		
 		plt.figure(figsize=(7,7))
-		for Evg, col, ln, phi in zip(E_avg_Eext, cols, lines, phis): plt.plot(freqs, abs(Evg), linewidth=1, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
+		for Evg, col, ln, phi in zip(E_Eext_store, cols, lines, phis): plt.plot(freqs, abs(Evg), linewidth=1, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
 		plt.xscale('log')
 		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
-		plt.ylabel(r'$\rm \vert E_{avg.}\vert/\vert E_{ext}\vert$', fontsize=25)
+		plt.ylabel(r'$\rm \vert E\vert/\vert E_{ext}\vert$', fontsize=25)
 		plt.ylim([-0.05,1.1])
 		plt.legend(fontsize=20, frameon=False, loc=4)
 		plt.tight_layout()
@@ -535,21 +609,21 @@ class CAEP:
 		plt.xscale('log')
 		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
 		plt.ylabel(r'$\rm \vert E_{e}\vert/\vert E_{ext}\vert$', fontsize=25)
-		plt.ylim([0.9,1.5])
+		plt.ylim([0.9,2])
 		plt.legend(fontsize=20, frameon=False)#, loc=4)
 		plt.tight_layout()
 		plt.show()
 
 		plt.figure(figsize=(7,7))
-		for siff, col, ln, phi in zip(sigma_eff, cols, lines, phis): plt.plot(freqs, abs(siff), linewidth=1, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
+		for siff, col, ln, phi in zip(sigma_eff_per_sigma_e, cols, lines, phis): plt.plot(freqs, abs(siff), linewidth=1, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
 		plt.xscale('log')
 		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
 		plt.ylabel(r'$\rm \vert \bar{\sigma}/ \sigma_e \vert$', fontsize=25)
 		plt.ylim([-0.05,1.1])
-		plt.legend(fontsize=20, frameon=False, loc=4)
+		plt.legend(fontsize=20, frameon=False, loc=3)
 		plt.tight_layout()
 		plt.show()
-
+		
 
 		## Now choose 6 frequencies and vary phi continuously
 		chi_p_store_2 = []
@@ -571,37 +645,162 @@ class CAEP:
 			chi_s_store_2.append(chi_s)
 		chi_p_store_2 = np.array(chi_p_store_2)
 		chi_s_store_2 = np.array(chi_s_store_2)
-		E_avg_Eext_2 = (1 + chi_p_store_2)
-		sigma_eff_2 = 1 + chi_s_store_2/ (1 + chi_p_store_2)
+
+		phi_theta_1 = (chi_p_store_2*(1 - sigma_m/sigma_e) + chi_s_store_2)/3.0 
+		sigma_eff_per_sigma_e_2 = 1 + 3*phi_theta_1 + 3*phi_theta_1**2/(1-phi_theta_1)
+
 		plt.figure(figsize=(7,7))
-		for siff, col, ln, lab in zip(sigma_eff_2, cols, lines, labels): plt.plot(phis, abs(siff), linewidth=1, c=col, linestyle=ln, label=r'$\rm f=$'+lab)
+		for siff, col, ln, lab in zip(sigma_eff_per_sigma_e_2, cols, lines, labels): plt.plot(phis, abs(siff), linewidth=1, c=col, linestyle=ln, label=r'$\rm f=$'+lab)
 		plt.xlabel(r'$\rm \phi$', fontsize=25)
 		plt.ylabel(r'$\rm \vert \bar{\sigma}/ \sigma_e \vert$', fontsize=25)
 		plt.ylim([-0.05,1.1])
-		plt.legend(fontsize=20, frameon=False, loc=4)
+		plt.legend(fontsize=20, frameon=False, loc=3)
 		plt.tight_layout()
 		plt.show()
 
 
+	def load_simulation_data(self, plot=False):
+		data = np.loadtxt("algam.dat")
+		# self.sim_alphas  = data[:,0]
+		# self.sim_gammas  = data[:,1]
+		self.sim_radii   = data[:,2]/self.scaling
+		self.sim_volumes = data[:,3]/self.scaling**3
+		self.phi = self.sim_volumes.sum()/4.0**3       # box=2*2*2 mm^3
+		self.sigma_t = 2*self.sigma_e + self.sigma_c + self.phi*(self.sigma_e - self.sigma_c)
+
+		self.sim_alphas = 3*self.sigma_e*self.sigma_c/(self.Cm*self.sim_radii*self.sigma_t)
+		self.sim_gammas = self.SL/self.Cm + self.sigma_c*self.sigma_e*(2+self.phi)/(self.Cm*self.sim_radii*self.sigma_t)
+
+		hf = h5py.File('data_pxyz.h5', 'r')
+		self.permitted = np.array(hf.get('permitted'))
+		self.sim_px = np.array(hf.get('px'))
+		self.sim_py = np.array(hf.get('py'))
+		self.sim_pz = np.array(hf.get('pz'))
+		self.sim_time = np.array(hf.get('t'))
+		hf.close()
+		# statistical moments about average
+		
+		m1z = []
+		m2z = []
+		m3z = []
+		m4z = []
+		m5z = []
+		m6z = []
+		m7z = []
+		m8z = []
+		m9z = []
+		m10z = []
+		for snap in range(len(self.sim_pz)):
+			dz = self.sim_pz[snap] - np.mean(self.sim_pz[snap])
+			m1z.append(np.mean(self.sim_pz[snap]))
+			m2z.append(np.mean(dz**2))
+			m3z.append(np.mean(dz**3))
+			m4z.append(np.mean(dz**4))
+			m5z.append(np.mean(dz**5))
+			m6z.append(np.mean(dz**6))
+			m7z.append(np.mean(dz**7))
+			m8z.append(np.mean(dz**8))
+			m9z.append(np.mean(dz**9))
+			m10z.append(np.mean(dz**10))
+		self.m1z = np.array(m1z)
+		self.m2z = np.array(m2z)
+		self.m3z = np.array(m3z)
+		self.m4z = np.array(m4z)
+		self.m5z = np.array(m5z)
+		self.m6z = np.array(m6z)
+		self.m7z = np.array(m7z)
+		self.m8z = np.array(m8z)
+		self.m9z = np.array(m9z)
+		self.m10z = np.array(m10z)
+
+	def plot_simulation_data(self):
+		fig, ax = plt.subplots(1, 2, figsize=(15,7))
+		ax[0].plot(self.sim_time[:49], np.mean(self.sim_px[:49,self.permitted], axis=1), 'r', linestyle='-.', label='data, x')
+		ax[0].plot(self.sim_time[:49], np.mean(self.sim_py[:49,self.permitted], axis=1), 'g', linestyle='--', label='data, y')
+		ax[0].plot(self.sim_time[:49], np.mean(self.sim_pz[:49,self.permitted], axis=1), 'b', linestyle='-', label='data, z')
+		ax[1].plot(self.sim_time[:49], np.var(self.sim_px[:49,self.permitted], axis=1), 'r', linestyle='-.', label='data, x')
+		ax[1].plot(self.sim_time[:49], np.var(self.sim_py[:49,self.permitted], axis=1), 'g', linestyle='--', label='data, y')
+		ax[1].plot(self.sim_time[:49], np.var(self.sim_pz[:49,self.permitted], axis=1), 'b', linestyle='-', label='data, z')
+		ax[0].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
+		ax[1].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
+		ax[0].set_ylabel(r'$\rm \vert \mu\vert \ [A/mm^2]$', fontsize=25)
+		ax[1].set_ylabel(r'$\rm \sigma^2 \ [A^2/mm^4]$', fontsize=25)
+		ax[1].yaxis.set_ticks_position("right")
+		ax[1].yaxis.set_label_position("right")
+		ax[0].set_ylim([0,0.9])
+		ax[1].set_ylim([0, 0.006])
+		ax[0].legend(fontsize=20, frameon=False)
+		ax[1].legend(fontsize=20, frameon=False)
+		plt.tight_layout()
+		plt.show()		
+
+		fig, ax = plt.subplots(1,1,figsize=(7,7))
+		ax.hist(self.sim_alphas/np.mean(self.sim_alphas), 100, histtype='step', color='r', hatch='/', label=r'$\rm \alpha/\bar{\alpha}$', density=True)
+		ax.hist(self.sim_gammas/np.mean(self.sim_gammas), 100, histtype='step', color='b', hatch='-', label=r'$\rm \gamma/\bar{\gamma}$', density=True)
+		ax.set_ylabel(r"$\rm PDF$", fontsize=25)
+		ax.set_xlabel(r"$\rm value$", fontsize=25)
+		# ax.set_xscale('log')
+		ax.set_yscale('log')
+		ax.legend(fontsize=20, frameon=False)
+		plt.tight_layout()
+		plt.show()
+
+		fig, ax = plt.subplots(1,1,figsize=(7,7))
+		ax.plot(self.sim_time, self.m2z, label=r'$\rm m_2$', color='b', linewidth=1)
+		ax.plot(self.sim_time, self.m3z, label=r'$\rm m_3$', color='r', linewidth=1)
+		ax.plot(self.sim_time, self.m4z, label=r'$\rm m_4$', color='c', linewidth=1)
+		ax.plot(self.sim_time, self.m5z, label=r'$\rm m_5$', color='m', linewidth=1)
+		ax.plot(self.sim_time, self.m6z, label=r'$\rm m_6$', color='k', linewidth=1)
+		ax.set_ylim([-0.01,0.025])
+		ax.set_xlim([0, 4.1])
+		ax.set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
+		ax.legend(fontsize=20, frameon=False)
+		plt.tight_layout()
+		plt.show()
+
+		m1max = np.max(abs(self.m1z))
+		m2max = np.max(abs(self.m2z))
+		m3max = np.max(abs(self.m3z))
+		m4max = np.max(abs(self.m4z))
+		m5max = np.max(abs(self.m5z))
+		m6max = np.max(abs(self.m6z))
+		m7max = np.max(abs(self.m7z))
+		m8max = np.max(abs(self.m8z))
+		m9max = np.max(abs(self.m9z))
+		m10max = np.max(abs(self.m10z))
+		mmaxs = [m1max, m2max, m3max, m4max, m5max, m6max, m7max, m8max, m9max, m10max]
+		ks = range(1,11)
+		fig, ax = plt.subplots(1,1,figsize=(7,7))
+		ax.plot(ks, mmaxs, color='r', linewidth=1, linestyle='--')
+		ax.scatter(ks, mmaxs, color='k', marker='x', s=50)
+		ax.set_xlabel(r'$\rm k$', fontsize=25)
+		ax.set_ylabel(r'$\rm max(\vert m_k\vert)$', fontsize=25)
+		plt.tight_layout()
+		plt.show()
+
+
+
 testnum    =  4           # 6: smoothed step function, 5: Gaussian, 4: sharp step pulse, 3: relaxation test
-tf         =  2e-6	      # [s]
-eps        =  0.982       # eps = 1/(1 + a^2 /lamda^2)**0.5 = 0.982 
+tf         =  2.0e-6	      # [s]
+eps        =  0.982       
 xmin       = -5.0
 xmax       =  5.0
 nx         =  2000
-t_samples  =  100000
+t_samples  =  1e3 #1e5
 max_t_step =  1e-9
 sigma_e    =  15
 sigma_c    =  1
-phi        =  0.13*(4*np.pi/3.0)*(5e-4)**3/(1e-9)
-sep        =  CAEP(eps, sigma_e, sigma_c, xmin, xmax, testnum, tf, max_t_step, t_samples, nx, phi)
+SL         =  1.9
+phi        =  0.0025 #0.13 #*(4*np.pi/3.0)*(5e-4)**3/(1e-9)
+sep        =  CAEP(eps, sigma_e, sigma_c, SL, xmin, xmax, testnum, tf, max_t_step, t_samples, nx, phi)
 
 sep.Solve()
+
 # sep.relaxation()
-# sep.evolution_pdf()
+# sep.evolution_pdf()    # must set verbose=True in Solve.
 # sep.statistics()
-sep.time_domain_analysis()
+# sep.time_domain_analysis()
 # sep.fourier_analysis()
 
-# pdb.set_trace()
+pdb.set_trace()
 
