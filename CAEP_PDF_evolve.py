@@ -16,6 +16,8 @@ setup_text_plots(fontsize=15, usetex=True)
 import scipy.fftpack
 import h5py
 from scipy import special
+#from pyfod.fod import caputo
+from mittag_leffler import ml
 
 def sigmoid(x):
   return 1 / (1 + np.exp(-x))
@@ -56,12 +58,12 @@ class CAEP:
 		else:
 			self.load_simulation_data()
 			self.alpha_b = np.median(self.sim_alphas)
-			self.gamma_b = np.median(self.sim_gammas)
+			self.gamma_b = np.median(self.sim_gammas)*1.01
 			self.R       = 3*self.sigma_e*self.sigma_c/(self.alpha_b*self.Cm*self.sigma_t) 
 			self.eta     = 1 + self.SL*self.sigma_t*self.R/((2 + self.phi)*self.sigma_e*self.sigma_c)
 			self.tau     = self.Cm*self.sigma_t*self.R/((2 + self.phi)*self.sigma_e*self.sigma_c)
 			self.omega   = 0.0
-			# self.plot_simulation_data()
+			
 		# experiments
 		self.nu_exp    =  7.246803016058461
 		self.cc_exp    =  0.8884126275039926
@@ -71,12 +73,9 @@ class CAEP:
 		self.epsilon = 1.0/np.sqrt(1.0 + self.aa_exp**2/self.lamda_exp**2)
 		self.alpha_p = self.alpha_b*self.gamma_p/(self.epsilon*self.gamma_b - self.cc_exp*self.gamma_p**2*np.sqrt(1 - self.epsilon**2))
 		self.u_exp   = -self.lamda_exp*self.gamma_p/(self.epsilon*self.alpha_p)
-		
-		# a = -3/((2+self.phi)*(self.eta + complex(0,1)*self.omega*self.tau))
-		# b = -3*(self.sigma_e-self.sigma_c)*(self.eta-1+complex(0,1)*self.omega*self.tau)/((self.sigma_t)*(self.eta+complex(0,1)*self.omega*self.tau))
-		# self.chi_p   = a*self.phi
-		# self.chi_s   = (1 + a*self.phi)*b*self.phi
-		# self.chi     = self.chi_p + self.chi_s
+		# if self.test == 4:
+		# 	self.plot_simulation_data()
+
 
 		# initialize the t Student PDF parameters
 		self.u0        =  self.sigma_e*self.get_pulse(0)
@@ -132,7 +131,7 @@ class CAEP:
 			else:
 				return 0.0
 		elif self.test==4:
-			if t<1e-6:
+			if t<=1e-6-0.04e-6:
 				return self.E0
 			else:
 				return 0.0
@@ -154,9 +153,15 @@ class CAEP:
 		# self.p_bar = self.calculate_p_bar()
 		E_ext = self.get_pulse(tnow)
 		nu = self.sigma_c/self.sigma_e
-		phi = self.phi
-		k = (2 + 3*phi + nu)/(2 + nu + phi*(1-nu)) - 3*phi**2*nu/( (2+ phi)*self.eta*(2 + nu + phi*(1-nu)) )
-		self.u = self.sigma_e*E_ext/k
+		
+		# case 1. u=sigma_e * E
+		#phi = self.phi
+		#k = (2 + 3*phi + nu)/(2 + nu + phi*(1-nu)) - 3*phi**2*nu/( (2+ phi)*self.eta*(2 + nu + phi*(1-nu)) )
+		#self.u = self.sigma_e*E_ext/k
+		# or
+		self.u = self.sigma_e*(self.sigma_t*E_ext - nu*self.phi**2*pbar) / ( (2+3*self.phi)*self.sigma_e + self.sigma_c )
+		# case 2. u = <J>
+		# self.u = self.sigma_e*E_ext*(2+nu+3*phi*nu)/(2+nu+3*phi) + phi*pbar*(1 - (1-nu)*(2+phi - 3*nu*phi**2/(2+3*phi + nu) )/(2+nu+phi*(1-nu)))
 		return self.u
 
 
@@ -230,6 +235,10 @@ class CAEP:
 			fhistory[n] = f(tn, yn)
 			y[n+1] = y0 + np.dot(w[0:n+1], fhistory[n::-1])
 		return y
+	
+
+
+	
 
 	def Solve(self, fraction=1):
 		self.t_evaluation = np.linspace(0, self.tfinal, self.eval_point)
@@ -240,7 +249,7 @@ class CAEP:
 			self.mus     = self.sol[:,0]
 			self.sigma2s = self.sol[:,1]
 		else:
-			self.sol = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob, max_step=self.maxstep, t_eval=self.t_evaluation) 
+			self.sol     = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob, max_step=self.maxstep, t_eval=self.t_evaluation) 
 			self.times   = self.sol.t
 			self.mus     = self.sol.y[0]
 			self.sigma2s = self.sol.y[1]
@@ -250,16 +259,30 @@ class CAEP:
 		
 
 		if self.test==4:
-			data_sim = np.loadtxt("data_time_mean_variance_ps.dat")
+			a = 1.01
+			fractional_pz1  = 1 - ml(-(self.gamma_b-self.gamma_p**2)*(self.times)**a, a)
+			fractional_pz1 += -( 1 - ml(-(self.gamma_b-self.gamma_p**2)*(abs(self.times - 1e-6+0.04e-6))**a, a) ) * np.heaviside(self.times - 1e-6+0.04e-6, 0)
+			fractional_pz1 *= self.get_u(0,0)*(self.epsilon*self.gamma_p*self.alpha_p - self.alpha_b)/(self.gamma_b - self.gamma_p**2)
+
+			# a = 0.99
+			# fractional_pz2  = 1 - ml(-(self.gamma_b-self.gamma_p**2)*(self.times)**a, a)
+			# fractional_pz2 += -( 1 - ml(-(self.gamma_b-self.gamma_p**2)*(abs(self.times - 1e-6))**a, a) ) * np.heaviside(self.times - 1e-6, 0)
+			# fractional_pz2 *= self.get_u(0,0)*(self.epsilon*self.gamma_p*self.alpha_p - self.alpha_b)/(self.gamma_b - self.gamma_p**2)
+
 			fig, ax = plt.subplots(1, 2, figsize=(15,7))
-			ax[0].plot(1e6*self.times, -self.mus, 'r', linestyle='-', linewidth=2, label=r'$\rm p_z\ model$')
-			ax[0].plot(data_sim[:,0], data_sim[:,1], color='g', linestyle=':', linewidth=1, label=r'$\rm p_x\ simulation$')
-			ax[0].plot(data_sim[:,0], data_sim[:,2], color='b', linestyle='-.', linewidth=1, label=r'$\rm p_y\ simulation$')
-			ax[0].scatter(data_sim[:,0], data_sim[:,3], color='k', marker='o', s=10, label=r'$\rm p_z\ simulation$')
-			ax[1].plot(1e6*self.times, self.sigma2s, 'r', linestyle='-', linewidth=2, label=r'$\rm p_z\ model$')
-			ax[1].plot(data_sim[:,0], data_sim[:,4], color='g', linestyle=':', linewidth=1, label=r'$\rm p_x\ simulation$')
-			ax[1].plot(data_sim[:,0], data_sim[:,5], color='b', linestyle='-.', linewidth=1, label=r'$\rm p_y\ simulation$')
-			ax[1].scatter(data_sim[:,0], data_sim[:,6], color='k', marker='o', s=10, label=r'$\rm p_z\ simulation$')
+			# ax[0].plot(1e6*self.times, abs(fractional_pz2), color='b', linewidth=1 , linestyle='-.', label=r'$\rm model,\ \alpha=0.99$'))
+			ax[0].plot(1e6*self.times, -self.mus, 'r', linestyle='-', linewidth=1, label=r'$\rm model,\ \alpha=1$')
+			ax[0].plot(1e6*self.times, abs(fractional_pz1), color='g', linewidth=2, linestyle='--', label=r'$\rm model,\ \alpha=1.01$')
+			
+			ax[0].plot(self.sim_time[:49], np.mean(self.sim_px[:49,self.permitted], axis=1), color='purple', linestyle=':', linewidth=2, label=r'$\rm p_x\ simulation$')
+			ax[0].plot(self.sim_time[:49], np.mean(self.sim_py[:49,self.permitted], axis=1), color='m', linestyle='-.', linewidth=2, label=r'$\rm p_y\ simulation$')
+			ax[0].scatter(self.sim_time[:49], np.mean(self.sim_pz[:49,self.permitted], axis=1), color='k', marker='p', s=20, label=r'$\rm p_z\ simulation$')
+			
+			
+			ax[1].plot(1e6*self.times, self.sigma2s, 'r', linestyle='-', linewidth=1, label=r'$\rm model,\ \alpha=1$')
+			ax[1].plot(self.sim_time[:49], np.var(self.sim_px[:49,self.permitted], axis=1), color='purple', linestyle=':', linewidth=2, label=r'$\rm p_x\ simulation$')
+			ax[1].plot(self.sim_time[:49], np.var(self.sim_py[:49,self.permitted], axis=1), color='m', linestyle='-.', linewidth=2, label=r'$\rm p_y\ simulation$')
+			ax[1].scatter(self.sim_time[:49], self.m2z[:49], color='k', marker='p', s=20, label=r'$\rm p_z\ simulation$')
 			ax[0].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 			ax[1].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 			ax[0].set_ylabel(r'$\rm \vert \mu\vert \ [A/mm^2]$', fontsize=25)
@@ -271,6 +294,27 @@ class CAEP:
 			ax[1].legend(fontsize=15, frameon=True)
 			plt.tight_layout()
 			plt.show()
+			# data_sim = np.loadtxt("data_time_mean_variance_ps.dat")
+			# fig, ax = plt.subplots(1, 2, figsize=(15,7))
+			# ax[0].plot(1e6*self.times, -self.mus, 'r', linestyle='-', linewidth=2, label=r'$\rm p_z\ model$')
+			# ax[0].plot(data_sim[:,0], data_sim[:,1], color='g', linestyle=':', linewidth=1, label=r'$\rm p_x\ simulation$')
+			# ax[0].plot(data_sim[:,0], data_sim[:,2], color='b', linestyle='-.', linewidth=1, label=r'$\rm p_y\ simulation$')
+			# ax[0].scatter(data_sim[:,0], data_sim[:,3], color='k', marker='o', s=10, label=r'$\rm p_z\ simulation$')
+			# ax[1].plot(1e6*self.times, self.sigma2s, 'r', linestyle='-', linewidth=2, label=r'$\rm p_z\ model$')
+			# ax[1].plot(data_sim[:,0], data_sim[:,4], color='g', linestyle=':', linewidth=1, label=r'$\rm p_x\ simulation$')
+			# ax[1].plot(data_sim[:,0], data_sim[:,5], color='b', linestyle='-.', linewidth=1, label=r'$\rm p_y\ simulation$')
+			# ax[1].scatter(data_sim[:,0], data_sim[:,6], color='k', marker='o', s=10, label=r'$\rm p_z\ simulation$')
+			# ax[0].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
+			# ax[1].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
+			# ax[0].set_ylabel(r'$\rm \vert \mu\vert \ [A/mm^2]$', fontsize=25)
+			# ax[1].set_ylabel(r'$\rm \sigma^2\ [A^2/mm^4]$', fontsize=25)
+			# ax[0].set_ylim([0, 1.0])
+			# ax[1].yaxis.set_ticks_position("right")
+			# ax[1].yaxis.set_label_position("right") 
+			# ax[0].legend(fontsize=15, frameon=True)
+			# ax[1].legend(fontsize=15, frameon=True)
+			# plt.tight_layout()
+			# plt.show()
 		else:
 			fig, ax = plt.subplots(1, 2, figsize=(15,7))
 			ax[0].plot(1e6*self.times, -self.mus, 'r', linestyle='-', linewidth=2)
@@ -676,10 +720,9 @@ class CAEP:
 		self.sim_px = np.array(hf.get('px'))
 		self.sim_py = np.array(hf.get('py'))
 		self.sim_pz = np.array(hf.get('pz'))
-		self.sim_time = np.array(hf.get('t'))
+		self.sim_time = np.array(hf.get('t')) + 0.04
 		hf.close()
 		# statistical moments about average
-		
 		m1z = []
 		m2z = []
 		m3z = []
@@ -713,14 +756,18 @@ class CAEP:
 		self.m9z = np.array(m9z)
 		self.m10z = np.array(m10z)
 
+
 	def plot_simulation_data(self):
+		a = 1.008
+		fractional_pz = self.get_u(0,0)*(1-ml(-(self.gamma_b-self.gamma_p**2)*(1e-6*self.sim_time[:23])**a, a))*(self.epsilon*self.gamma_p*self.alpha_p - self.alpha_b)/(self.gamma_b - self.gamma_p**2)
 		fig, ax = plt.subplots(1, 2, figsize=(15,7))
 		ax[0].plot(self.sim_time[:49], np.mean(self.sim_px[:49,self.permitted], axis=1), 'r', linestyle='-.', label='data, x')
 		ax[0].plot(self.sim_time[:49], np.mean(self.sim_py[:49,self.permitted], axis=1), 'g', linestyle='--', label='data, y')
 		ax[0].plot(self.sim_time[:49], np.mean(self.sim_pz[:49,self.permitted], axis=1), 'b', linestyle='-', label='data, z')
+		ax[0].plot(self.sim_time[:23], abs(fractional_pz), color='r', linestyle='--' )
 		ax[1].plot(self.sim_time[:49], np.var(self.sim_px[:49,self.permitted], axis=1), 'r', linestyle='-.', label='data, x')
 		ax[1].plot(self.sim_time[:49], np.var(self.sim_py[:49,self.permitted], axis=1), 'g', linestyle='--', label='data, y')
-		ax[1].plot(self.sim_time[:49], np.var(self.sim_pz[:49,self.permitted], axis=1), 'b', linestyle='-', label='data, z')
+		ax[1].plot(self.sim_time[:49], self.m2z[:49], 'b', linestyle='-', label='data, z')
 		ax[0].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 		ax[1].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 		ax[0].set_ylabel(r'$\rm \vert \mu\vert \ [A/mm^2]$', fontsize=25)
@@ -802,5 +849,5 @@ sep.Solve()
 # sep.time_domain_analysis()
 # sep.fourier_analysis()
 
-pdb.set_trace()
+# pdb.set_trace()
 
