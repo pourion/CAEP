@@ -224,17 +224,32 @@ class CAEP:
 		d = len(y0)
 		N = len(tspan)
 		h = (tspan[N-1] - tspan[0])/(N - 1)
-		c = special.rgamma(a) * np.power(h, a) / a
-		w = c * np.diff(np.power(np.arange(N), a))
-		fhistory = np.zeros((N - 1, d), dtype=type(y0[0]))
-		y = np.zeros((N, d), dtype=type(y0[0]))
-		y[0] = y0
-		for n in range(0, N - 1):
-			tn = tspan[n]
-			yn = y[n]
-			fhistory[n] = f(tn, yn)
-			y[n+1] = y0 + np.dot(w[0:n+1], fhistory[n::-1])
-		return y
+		if a<1:
+			c = special.rgamma(a) * np.power(h, a) / a
+			w = c * np.diff(np.power(np.arange(N), a))
+			fhistory = np.zeros((N - 1, d), dtype=type(y0[0]))
+			y = np.zeros((N, d), dtype=type(y0[0]))
+			y[0] = y0
+			for n in range(0, N - 1):
+				tn = tspan[n]
+				yn = y[n]
+				fhistory[n] = f(tn, yn)
+				y[n+1] = y0 + np.dot(w[0:n+1], fhistory[n::-1])
+			return y
+		elif a>1:
+			cc = special.gamma(3-a)*np.power(h,a)
+			bb = np.diff(np.power(np.arange(N), 2-a))
+			fhistory = np.zeros((N - 1, d), dtype=type(y0[0]))
+			y = np.zeros((N, d), dtype=type(y0[0]))
+			y[0] = y0
+			for n in range(0, N - 1):
+				tn = tspan[n]
+				yn = y[n]
+				fhistory[n] = f(tn, yn)
+				y[n + 1] = y[n] + cc*fhistory[n] 
+				if n>1:
+					y[n + 1] += np.dot( bb[:n-1] - bb[1:n], (y[1:n]-y[0:n-1])[::-1] )
+			return y 
 	
 
 
@@ -841,7 +856,7 @@ SL         =  1.9
 phi        =  0.0025 #0.13 #*(4*np.pi/3.0)*(5e-4)**3/(1e-9)
 sep        =  CAEP(eps, sigma_e, sigma_c, SL, xmin, xmax, testnum, tf, max_t_step, t_samples, nx, phi)
 
-sep.Solve()
+sep.Solve(1.1)
 
 # sep.relaxation()
 # sep.evolution_pdf()    # must set verbose=True in Solve.
