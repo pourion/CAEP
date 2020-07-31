@@ -23,7 +23,8 @@ def sigmoid(x):
   return 1 / (1 + np.exp(-x))
 
 class CAEP:
-	def __init__(self, epsilon, sigma_e, sigma_c, SL, xmin, xmax, testnum, tf, maxstep =2e-9, eval_points=1000, Nx=2000, phi=0.13):
+	def __init__(self, epsilon, sigma_e, sigma_c, SL, xmin, xmax, testnum, tf, maxstep =2e-9, eval_points=1000, Nx=2000, phi=0.13, PRINT_PARS=True):
+		self.print_pars = PRINT_PARS
 		self.animate = False
 		self.verbose = False
 		self.test    = testnum
@@ -101,7 +102,15 @@ class CAEP:
 		#self.sigma2_ini = (self.gamma_p**2*self.mu_ini**2 + 2*self.epsilon*self.gamma_p*self.alpha_p*self.u0*self.mu_ini + self.alpha_p**2*self.u0**2)/(2*(self.gamma_b - self.gamma_p))
 		#self.plot()
 		#self.Solve()
-		
+
+	def get_colors(self, num, cmmp='coolwarm'):
+		cmap = plt.cm.get_cmap(cmmp)
+		cs = np.linspace(0, 1, num)
+		colors = []
+		for i in range(num):
+			colors.append(cmap(cs[i]))
+		return np.array(colors)
+
 	"""
 	initialize by delta distribution around origin
 	see Dehghan & Mohammadi 2014
@@ -183,7 +192,8 @@ class CAEP:
 		self.nu    = (self.aa**2 + (mu - self.lamda)**2 + 3*s2)/(2*s2)
 		self.cc    = (mu - self.lamda)*(self.aa**2 + (mu - self.lamda)**2 + s2)/(2*self.aa*s2)
 		self.get_PDF()
-		self.print_params(t, un)
+		if self.print_pars:
+			self.print_params(t, un)
 
 	def dmu_sigma2(self, t, y):
 		self.update_params(t, y[0], y[1])
@@ -236,7 +246,7 @@ class CAEP:
 				fhistory[n] = f(tn, yn)
 				y[n+1] = y0 + np.dot(w[0:n+1], fhistory[n::-1])
 			return y
-		elif a>1:
+		elif a>1: # Sun and Wu 2006
 			cc = special.gamma(3-a)*np.power(h,a)
 			bb = np.diff(np.power(np.arange(N), 2-a))
 			fhistory = np.zeros((N - 1, d), dtype=type(y0[0]))
@@ -250,53 +260,63 @@ class CAEP:
 				if n>1:
 					y[n + 1] += np.dot( bb[:n-1] - bb[1:n], (y[1:n]-y[0:n-1])[::-1] )
 			return y 
-	
 
-
-	
-
-	def Solve(self, fraction=1):
+	def solve_only(self, fraction=1):
+		self.fraction = fraction
 		self.t_evaluation = np.linspace(0, self.tfinal, self.eval_point)
 		y0 = [self.mu_ini, self.sigma2_ini]
+		# fractional model
 		if fraction!=1:
 			self.sol     = self.caputoEuler(fraction, self.dmu_sigma2, y0, self.t_evaluation)
 			self.times   = self.t_evaluation
 			self.mus     = self.sol[:,0]
 			self.sigma2s = self.sol[:,1]
+		# exponential model
 		else:
 			self.sol     = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob, max_step=self.maxstep, t_eval=self.t_evaluation) 
 			self.times   = self.sol.t
 			self.mus     = self.sol.y[0]
 			self.sigma2s = self.sol.y[1]
+		self.Es = np.array([self.get_pulse(t) for t in self.times])
 
 
+	def Solve(self, fraction=1):
+		self.fraction = fraction
+		self.t_evaluation = np.linspace(0, self.tfinal, self.eval_point)
+		y0 = [self.mu_ini, self.sigma2_ini]
+		# fractional model
+		if fraction!=1:
+			self.sol_n     = self.caputoEuler(fraction, self.dmu_sigma2, y0, self.t_evaluation)
+			self.times_n   = self.t_evaluation
+			self.mus_n     = self.sol_n[:,0]
+			self.sigma2s_n = self.sol_n[:,1]
+		# exponential model
+		self.sol     = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob, max_step=self.maxstep, t_eval=self.t_evaluation) 
+		self.times   = self.sol.t
+		self.mus     = self.sol.y[0]
+		self.sigma2s = self.sol.y[1]
 		self.Es = np.array([self.get_pulse(t) for t in self.times])
 		
-
 		if self.test==4:
-			a = 1.01
+			a = fraction
 			fractional_pz1  = 1 - ml(-(self.gamma_b-self.gamma_p**2)*(self.times)**a, a)
 			fractional_pz1 += -( 1 - ml(-(self.gamma_b-self.gamma_p**2)*(abs(self.times - 1e-6+0.04e-6))**a, a) ) * np.heaviside(self.times - 1e-6+0.04e-6, 0)
 			fractional_pz1 *= self.get_u(0,0)*(self.epsilon*self.gamma_p*self.alpha_p - self.alpha_b)/(self.gamma_b - self.gamma_p**2)
 
-			# a = 0.99
-			# fractional_pz2  = 1 - ml(-(self.gamma_b-self.gamma_p**2)*(self.times)**a, a)
-			# fractional_pz2 += -( 1 - ml(-(self.gamma_b-self.gamma_p**2)*(abs(self.times - 1e-6))**a, a) ) * np.heaviside(self.times - 1e-6, 0)
-			# fractional_pz2 *= self.get_u(0,0)*(self.epsilon*self.gamma_p*self.alpha_p - self.alpha_b)/(self.gamma_b - self.gamma_p**2)
-
 			fig, ax = plt.subplots(1, 2, figsize=(15,7))
-			# ax[0].plot(1e6*self.times, abs(fractional_pz2), color='b', linewidth=1 , linestyle='-.', label=r'$\rm model,\ \alpha=0.99$'))
-			ax[0].plot(1e6*self.times, -self.mus, 'r', linestyle='-', linewidth=1, label=r'$\rm model,\ \alpha=1$')
-			ax[0].plot(1e6*self.times, abs(fractional_pz1), color='g', linewidth=2, linestyle='--', label=r'$\rm model,\ \alpha=1.01$')
+			ax[0].plot(1e6*self.times, abs(self.mus), color='r', linewidth=1, linestyle='-', label=r'$\rm model,\ \alpha=1\ (N)$')
+			if fraction!=1: ax[0].plot(1e6*self.times_n, abs(self.mus_n), color='c', linewidth=2 , linestyle='--', label=r'$\rm model,\ \alpha=1.01\ (N)$')
+			ax[0].plot(1e6*self.times, abs(fractional_pz1), color='m', linewidth=2, linestyle=':', label=r'$\rm model,\ \alpha=1.01\ (A)$')
 			
-			ax[0].plot(self.sim_time[:49], np.mean(self.sim_px[:49,self.permitted], axis=1), color='purple', linestyle=':', linewidth=2, label=r'$\rm p_x\ simulation$')
-			ax[0].plot(self.sim_time[:49], np.mean(self.sim_py[:49,self.permitted], axis=1), color='m', linestyle='-.', linewidth=2, label=r'$\rm p_y\ simulation$')
+			ax[0].plot(self.sim_time[:49], np.mean(self.sim_px[:49,self.permitted], axis=1), color='b', linestyle='-', linewidth=2, label=r'$\rm p_x\ simulation$')
+			ax[0].plot(self.sim_time[:49], np.mean(self.sim_py[:49,self.permitted], axis=1), color='g', linestyle='-.', linewidth=2, label=r'$\rm p_y\ simulation$')
 			ax[0].scatter(self.sim_time[:49], np.mean(self.sim_pz[:49,self.permitted], axis=1), color='k', marker='p', s=20, label=r'$\rm p_z\ simulation$')
 			
 			
-			ax[1].plot(1e6*self.times, self.sigma2s, 'r', linestyle='-', linewidth=1, label=r'$\rm model,\ \alpha=1$')
-			ax[1].plot(self.sim_time[:49], np.var(self.sim_px[:49,self.permitted], axis=1), color='purple', linestyle=':', linewidth=2, label=r'$\rm p_x\ simulation$')
-			ax[1].plot(self.sim_time[:49], np.var(self.sim_py[:49,self.permitted], axis=1), color='m', linestyle='-.', linewidth=2, label=r'$\rm p_y\ simulation$')
+			ax[1].plot(1e6*self.times, self.sigma2s, 'r', linestyle='-', linewidth=1, label=r'$\rm model,\ \alpha=1\ (N)$')
+			if fraction!=1: ax[1].plot(1e6*self.times_n, abs(self.sigma2s_n), color='c', linewidth=2 , linestyle='--', label=r'$\rm model,\ \alpha=1.01\ (N)$')
+			ax[1].plot(self.sim_time[:49], np.var(self.sim_px[:49,self.permitted], axis=1), color='b', linestyle='-', linewidth=2, label=r'$\rm p_x\ simulation$')
+			ax[1].plot(self.sim_time[:49], np.var(self.sim_py[:49,self.permitted], axis=1), color='g', linestyle='-.', linewidth=2, label=r'$\rm p_y\ simulation$')
 			ax[1].scatter(self.sim_time[:49], self.m2z[:49], color='k', marker='p', s=20, label=r'$\rm p_z\ simulation$')
 			ax[0].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 			ax[1].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
@@ -305,8 +325,8 @@ class CAEP:
 			ax[0].set_ylim([0, 1.0])
 			ax[1].yaxis.set_ticks_position("right")
 			ax[1].yaxis.set_label_position("right") 
-			ax[0].legend(fontsize=15, frameon=True)
-			ax[1].legend(fontsize=15, frameon=True)
+			ax[0].legend(fontsize=14, frameon=False)
+			ax[1].legend(fontsize=14, frameon=False)
 			plt.tight_layout()
 			plt.show()
 			# data_sim = np.loadtxt("data_time_mean_variance_ps.dat")
@@ -332,8 +352,10 @@ class CAEP:
 			# plt.show()
 		else:
 			fig, ax = plt.subplots(1, 2, figsize=(15,7))
-			ax[0].plot(1e6*self.times, -self.mus, 'r', linestyle='-', linewidth=2)
-			ax[1].plot(1e6*self.times, self.sigma2s, 'r', linestyle='-', linewidth=2)
+			ax[0].plot(1e6*self.times, -self.mus, 'r', linestyle='-', linewidth=2, label=r'$\rm \alpha=1$')
+			if fraction!=1: ax[0].plot(1e6*self.times_n, -self.mus_n, 'b', linestyle='--', linewidth=2, label=r'$\rm \alpha=$'+str(fraction))
+			ax[1].plot(1e6*self.times, self.sigma2s, 'r', linestyle='-', linewidth=2, label=r'$\rm \alpha=1$')
+			if fraction!=1: ax[1].plot(1e6*self.times_n, self.sigma2s_n, 'b', linestyle='--', linewidth=2, label=r'$\rm \alpha=$'+str(fraction))
 			ax[0].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 			ax[1].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 			ax[0].set_ylabel(r'$\rm \vert \mu\vert \ [A/mm^2]$', fontsize=25)
@@ -341,6 +363,8 @@ class CAEP:
 			ax[0].set_ylim([0, 1.0])
 			ax[1].yaxis.set_ticks_position("right")
 			ax[1].yaxis.set_label_position("right") 
+			ax[0].legend(fontsize=15, frameon=False)
+			ax[1].legend(fontsize=15, frameon=False)
 			plt.tight_layout()
 			plt.show()
 
@@ -395,10 +419,6 @@ class CAEP:
 			# pdb.set_trace()
 
 
-
-
-
-
 	def evolution_pdf(self):
 		X, T = np.meshgrid(-self.x, 1e6*self.times)
 		# self.W_store = np.nan_to_num(sep.W_store)
@@ -416,10 +436,16 @@ class CAEP:
 
 
 	def time_domain_analysis(self):
-		mus  = self.mus 
-		var_p= self.sigma2s
+		if self.fraction!=1: 
+			mus  = self.mus_n 
+			var_p= self.sigma2s_n
+			times= self.times_n
+		else:
+			mus  = self.mus
+			var_p= self.sigma2s
+			times= self.times
+
 		Es   = self.Es 
-		times= self.times
 		nu   = self.sigma_c/self.sigma_e
 		area = 1 # mm^2
 		H    = 1 #mm
@@ -431,20 +457,25 @@ class CAEP:
 		Resistance = H*Es/(area*J_t)
 
 		fig, ax = plt.subplots(2, figsize=(7,7))
-		ax[0].plot(1e6*times, Es/40.0, linewidth=1, color='b', linestyle='-.', label=r'$\rm E_{ext}/40\ [kV/m]$')
-		ax[0].plot(1e6*times, sigma_bar_per_sigma_e_t, linewidth=1, color='r', linestyle=':', label=r'$\rm  \bar{\sigma}(t)/\sigma_e$')
-		ax[0].plot(1e6*times, Resistance/1000.0, linewidth=1, color='k', linestyle='-', label=r'$\rm R(t)\ [k\Omega]$')
+		ax[0].plot(1e6*times, Es/40.0, linewidth=2, color='b', linestyle='-.', label=r'$\rm E_{ext}/40\ [kV/m]$')
+		ax[0].plot(1e6*times, sigma_bar_per_sigma_e_t, linewidth=2, color='r', linestyle=':', label=r'$\rm  \bar{\sigma}(t)/\sigma_e$')
+		ax[0].plot(1e6*times, Resistance/1000.0, linewidth=2, color='k', linestyle='-', label=r'$\rm R(t)\ [k\Omega]$')
 		ymin0 = np.min([np.min(Es/40.0), np.min(sigma_bar_per_sigma_e_t), np.min(Resistance/1000)])
 		ymax0 = np.max([np.max(Es/40.0), np.max(sigma_bar_per_sigma_e_t), np.max(Resistance/1000)])
-		ax[0].set_ylim([1.1*ymin0, 1.1*ymax0])
-		# ax[0].set_ylim([0,1.1])
-		ax[1].plot(1e6*times, s_t, linewidth=1, color='b', linestyle='-.', label=r'$\rm s(t)\ [A/mm^2]$')
-		ax[1].plot(1e6*times, mus, linewidth=1, color='g', linestyle='--', label=r'$\rm p(t)\ [A/mm^2]$')
-		ax[1].plot(1e6*times, var_p*10, linewidth=1, color='r', linestyle=':', label=r'$\rm var(p)(t)\times 10\ [A^2/mm^4]$')
-		ax[1].plot(1e6*times, J_t*area, linewidth=1, color='k', linestyle='-', label=r'$\rm I(t)\ [A]$')
+		if self.test==4:
+			ax[0].set_ylim([-0.05,1.1])
+		else:
+			ax[0].set_ylim([1.1*ymin0, 1.1*ymax0])
+		ax[1].plot(1e6*times, s_t, linewidth=2, color='b', linestyle='-.', label=r'$\rm s(t)\ [A/mm^2]$')
+		ax[1].plot(1e6*times, mus, linewidth=2, color='g', linestyle='--', label=r'$\rm p(t)\ [A/mm^2]$')
+		ax[1].plot(1e6*times, var_p*10, linewidth=2, color='r', linestyle=':', label=r'$\rm var(p)(t)\times 10\ [A^2/mm^4]$')
+		ax[1].plot(1e6*times, J_t*area, linewidth=2, color='k', linestyle='-', label=r'$\rm I(t)\ [A]$')
 		ymin1 = np.min([np.min(s_t), np.min(mus), np.min(var_p*10), np.min(J_t*area)])
 		ymax1 = np.max([np.max(s_t), np.max(mus), np.max(var_p*10), np.max(J_t*area)])
-		ax[1].set_ylim([1.1*ymin1, 1.1*ymax1])
+		if self.test==4:
+			ax[1].set_ylim([-1,0.9])
+		else:
+			ax[1].set_ylim([1.1*ymin1, 1.1*ymax1])
 		ax[0].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 		ax[1].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 		ax[0].set_ylabel(r'$\rm value$', fontsize=25)
@@ -457,9 +488,15 @@ class CAEP:
 
 	def fourier_analysis(self):
 		indices = self.times > 0
-		mus = self.mus[indices]
+		if self.fraction!=1: 
+			mus  = self.mus_n[indices] 
+			var_p= self.sigma2s_n[indices]
+			times= self.times_n[indices]
+		else:
+			mus  = self.mus[indices]
+			var_p= self.sigma2s[indices]
+			times= self.times[indices]
 		Es  = self.Es[indices]
-		times = self.times[indices]
 
 		N = len(times)
 		T = times[1] - times[0]
@@ -488,14 +525,13 @@ class CAEP:
 		self.chi_s = self.alpha_s*self.phi / self.k
 		self.chi_p = self.alpha_p*self.phi / self.k
 		Eavg = self.Eextf
-		area = 1.0 # mm^2
+		area = 1.0    # mm^2
 		H    = 1.0    # mm
 		Ze   = self.sigma_e*area/H
 		self.Znormal = (self.sigma_e*self.Eextf)/(self.sigma_e*self.Eextf + self.phi*self.Pf*(1-self.sigma_m/self.sigma_e) + self.phi*self.Pf*self.chi_s/self.chi_p ) 
 		
 		self.permittivity = self.sigma_e*(self.chi_p*(1-self.sigma_m/self.sigma_e) + self.chi_s)
 		self.permittivity /= complex(0,1)*2*np.pi*self.xf*self.permittivity_0
-
 
 
 		plt.figure(figsize=(7,7))
@@ -586,11 +622,15 @@ class CAEP:
 		plt.show()
 
 	def relaxation(self):
-		if self.test==3:
-			mus = abs(self.mus[self.times>1e-6])
-			times = self.times[self.times>1e-6]
+		if self.test==3 or self.test==4:
+			if self.fraction!=1:
+				mus = abs(self.mus_n[self.times_n>1e-6])
+				times = self.times_n[self.times_n>1e-6]
+			else:
+				mus = abs(self.mus[self.times>1e-6])
+				times = self.times[self.times>1e-6]
 			plt.figure(figsize=(7,7))
-			plt.plot(1e6*times, mus, linewidth=1, color='k')
+			plt.plot(1e6*times, mus, linewidth=1, color='k', label=r'$\rm \alpha=$'+str(self.fraction))
 			plt.xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 			plt.ylabel(r'$\rm \vert \mu\vert \ [A/mm^2]$', fontsize=25)
 			plt.yscale('log')
@@ -605,7 +645,7 @@ class CAEP:
 		lines = ['--', ':', '-', '-.', '--', '-'] 
 		R = 7e-6
 		Cm = 0.01
-		SL = 1.9
+		SL = 1.9e5
 		sigma_e = 1.3
 		sigma_c = 0.6
 		h = 5e-9
@@ -643,7 +683,7 @@ class CAEP:
 
 
 		plt.figure(figsize=(7,7))
-		for chip, col, ln, phi in zip(chi_p_store, cols, lines, phis): plt.plot(freqs, abs(chip), linewidth=1, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
+		for chip, col, ln, phi in zip(chi_p_store, cols, lines, phis): plt.plot(freqs, abs(chip), linewidth=2, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
 		plt.xscale('log')
 		plt.yscale('log')
 		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
@@ -654,17 +694,17 @@ class CAEP:
 		plt.show()
 		
 		plt.figure(figsize=(7,7))
-		for Evg, col, ln, phi in zip(E_Eext_store, cols, lines, phis): plt.plot(freqs, abs(Evg), linewidth=1, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
+		for Evg, col, ln, phi in zip(E_Eext_store, cols, lines, phis): plt.plot(freqs, abs(Evg), linewidth=2, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
 		plt.xscale('log')
 		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
 		plt.ylabel(r'$\rm \vert E\vert/\vert E_{ext}\vert$', fontsize=25)
-		plt.ylim([-0.05,1.1])
+		plt.ylim([0.29,1.])
 		plt.legend(fontsize=20, frameon=False, loc=4)
 		plt.tight_layout()
 		plt.show()
 
 		plt.figure(figsize=(7,7))
-		for Ee, col, ln, phi in zip(E_e_Eext_store, cols, lines, phis): plt.plot(freqs, abs(Ee), linewidth=1, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
+		for Ee, col, ln, phi in zip(E_e_Eext_store, cols, lines, phis): plt.plot(freqs, abs(Ee), linewidth=2, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
 		plt.xscale('log')
 		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
 		plt.ylabel(r'$\rm \vert E_{e}\vert/\vert E_{ext}\vert$', fontsize=25)
@@ -674,11 +714,11 @@ class CAEP:
 		plt.show()
 
 		plt.figure(figsize=(7,7))
-		for siff, col, ln, phi in zip(sigma_eff_per_sigma_e, cols, lines, phis): plt.plot(freqs, abs(siff), linewidth=1, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
+		for siff, col, ln, phi in zip(sigma_eff_per_sigma_e, cols, lines, phis): plt.plot(freqs, abs(siff), linewidth=2, c=col, linestyle=ln, label=r'$\rm \phi=$'+str(phi))
 		plt.xscale('log')
 		plt.xlabel(r'$\rm frequency\ [1/s]$', fontsize=25)
 		plt.ylabel(r'$\rm \vert \bar{\sigma}/ \sigma_e \vert$', fontsize=25)
-		plt.ylim([-0.05,1.1])
+		plt.ylim([0.19,1.])
 		plt.legend(fontsize=20, frameon=False, loc=3)
 		plt.tight_layout()
 		plt.show()
@@ -709,10 +749,10 @@ class CAEP:
 		sigma_eff_per_sigma_e_2 = 1 + 3*phi_theta_1 + 3*phi_theta_1**2/(1-phi_theta_1)
 
 		plt.figure(figsize=(7,7))
-		for siff, col, ln, lab in zip(sigma_eff_per_sigma_e_2, cols, lines, labels): plt.plot(phis, abs(siff), linewidth=1, c=col, linestyle=ln, label=r'$\rm f=$'+lab)
+		for siff, col, ln, lab in zip(sigma_eff_per_sigma_e_2, cols, lines, labels): plt.plot(phis, abs(siff), linewidth=2, c=col, linestyle=ln, label=r'$\rm f=$'+lab)
 		plt.xlabel(r'$\rm \phi$', fontsize=25)
 		plt.ylabel(r'$\rm \vert \bar{\sigma}/ \sigma_e \vert$', fontsize=25)
-		plt.ylim([-0.05,1.1])
+		plt.ylim([0.19,1.0])
 		plt.legend(fontsize=20, frameon=False, loc=3)
 		plt.tight_layout()
 		plt.show()
@@ -773,7 +813,7 @@ class CAEP:
 
 
 	def plot_simulation_data(self):
-		a = 1.008
+		a = 1.01
 		fractional_pz = self.get_u(0,0)*(1-ml(-(self.gamma_b-self.gamma_p**2)*(1e-6*self.sim_time[:23])**a, a))*(self.epsilon*self.gamma_p*self.alpha_p - self.alpha_b)/(self.gamma_b - self.gamma_p**2)
 		fig, ax = plt.subplots(1, 2, figsize=(15,7))
 		ax[0].plot(self.sim_time[:49], np.mean(self.sim_px[:49,self.permitted], axis=1), 'r', linestyle='-.', label='data, x')
@@ -840,29 +880,63 @@ class CAEP:
 		plt.tight_layout()
 		plt.show()
 
+		
 
-
-testnum    =  4           # 6: smoothed step function, 5: Gaussian, 4: sharp step pulse, 3: relaxation test
-tf         =  2.0e-6	      # [s]
-eps        =  0.982       
+testnum    =  5           # 6: smoothed step function, 5: Gaussian, 4: sharp step pulse, 3: relaxation test
+case       =  3           # if testnum=5, then case=1, 2, 3, 4
+      
 xmin       = -5.0
 xmax       =  5.0
 nx         =  2000
-t_samples  =  1e3 #1e5
 max_t_step =  1e-9
-sigma_e    =  15
-sigma_c    =  1
-SL         =  1.9
-phi        =  0.0025 #0.13 #*(4*np.pi/3.0)*(5e-4)**3/(1e-9)
+
+if testnum==5:
+	if case==1:
+		sigma_e    =  1.3
+		sigma_c    =  0.6
+		SL         =  1.9
+		phi        =  0.3 
+		tf         =  2.0e-5	  # [s]
+		t_samples  =  1e5
+	elif case==2:
+		sigma_e    =  0.6
+		sigma_c    =  1.3
+		SL         =  1.9
+		phi        =  0.3 
+		tf         =  2.0e-5	  # [s]
+		t_samples  =  1e5
+	elif case==3:
+		sigma_e    =  1.3
+		sigma_c    =  0.6
+		SL         =  1.9e5
+		phi        =  0.3 
+		tf         =  2.0e-5	  # [s]
+		t_samples  =  1e5
+	elif case==4:
+		sigma_e    =  1.3
+		sigma_c    =  0.6
+		SL         =  1.9e5
+		phi        =  0.6
+		tf         =  2.0e-5	  # [s]
+		t_samples  =  1e5
+else:
+	sigma_e    =  15
+	sigma_c    =  1
+	SL         =  1.9
+	phi        =  0.0025
+	tf         =  2.0e-6         # [s]
+	t_samples  =  1e3
+
+eps        =  0.982 
 sep        =  CAEP(eps, sigma_e, sigma_c, SL, xmin, xmax, testnum, tf, max_t_step, t_samples, nx, phi)
 
-sep.Solve(1.1)
-
-# sep.relaxation()
-# sep.evolution_pdf()    # must set verbose=True in Solve.
+# sep.Solve()
 # sep.statistics()
 # sep.time_domain_analysis()
 # sep.fourier_analysis()
+
+# sep.relaxation()
+# sep.evolution_pdf()    # must set verbose=True in Solve.
 
 # pdb.set_trace()
 
