@@ -96,12 +96,9 @@ class CAEP:
 		# initial conditions
 		mu_int           = self.x*self.W
 		var_int          = self.x**2*self.W
-		self.mu_ini      = integrate.simps(mu_int, self.x) #np.sum(self.x*self.W)*(self.x[1]-self.x[0])       
-		self.sigma2_ini  = integrate.simps(var_int, self.x) - self.mu_ini**2 #np.sum(self.x**2*self.W)*(self.x[1]-self.x[0]) - self.mu_ini**2
-		#self.mu_ini = self.aa*self.cc/(self.nu - 1) + self.lamda
-		#self.sigma2_ini = (self.gamma_p**2*self.mu_ini**2 + 2*self.epsilon*self.gamma_p*self.alpha_p*self.u0*self.mu_ini + self.alpha_p**2*self.u0**2)/(2*(self.gamma_b - self.gamma_p))
-		#self.plot()
-		#self.Solve()
+		self.mu_ini      = 0.0 #integrate.simps(mu_int, self.x) #np.sum(self.x*self.W)*(self.x[1]-self.x[0])       
+		self.sigma2_ini  = 0.0 #integrate.simps(var_int, self.x) - self.mu_ini**2 #np.sum(self.x**2*self.W)*(self.x[1]-self.x[0]) - self.mu_ini**2
+
 
 	def get_colors(self, num, cmmp='coolwarm'):
 		cmap = plt.cm.get_cmap(cmmp)
@@ -195,18 +192,33 @@ class CAEP:
 		if self.print_pars:
 			self.print_params(t, un)
 
+	def telegrapher(self, t, y):
+		self.update_params(t, y[0], y[2])
+		u       =  self.get_u(t, y[0])
+		dy0     = y[1]
+		dy1     = (-(self.gamma_b-self.gamma_p**2)*y[0] + (self.epsilon*self.alpha_p*self.gamma_p - self.alpha_b)*u - y[1]  )/self.mass
+		dy2     = y[3]
+		dy3     = ( -2*(self.gamma_b-self.gamma_p**2)*y[2] + self.gamma_p**2*y[0]**2 + 2*self.epsilon*self.alpha_p*self.gamma_p*u*y[0] + self.alpha_p**2*u**2 - y[3] )/self.mass
+		return [dy0, dy1, dy2, dy3]
+
+	def jacob_teleg(self, t, y):
+		self.update_params(t, y[0], y[2])
+		return np.array( [0, 1, 0, 0], [-(self.gamma_b-self.gamma_p**2)/self.mass, -1.0/self.mass, 0, 0],\
+						 [0, 0, 0, 1], [2*self.gamma_p**2*y[0]+2*self.epsilon*self.alpha_p*self.gamma_p*u, 0, -2*(self.gamma_b-self.gamma_p**2), -1.0/self.mass ] )
+
+
 	def dmu_sigma2(self, t, y):
 		self.update_params(t, y[0], y[1])
 		u       =  self.get_u(t, y[0])
 		dmu     = -self.gamma_b*y[0] - self.alpha_b*u + self.gamma_p**2*y[0] + self.epsilon*self.alpha_p*self.gamma_p*u
-		dsigma2 = -2*(self.gamma_b - self.gamma_p**2)*y[1] + self.gamma_p**2*y[0]**2 + 2*self.epsilon*self.gamma_p*self.alpha_p*u*y[0] + self.alpha_p**2*u**2
+		dsigma2 = -2*(self.gamma_b - self.gamma_p**2)*y[1] + self.gamma_p**2*y[0]**2 + 2*self.epsilon*self.gamma_p*self.alpha_p*u*y[0] + self.alpha_p**2*u**2 
 		# g3      = -0.1*self.gamma_b
 		# dmu    += g3*y[0]**3 + 3*g3*y[0]*y[1]
 		# dsigma2+= 6*g3*y[0]**2*y[1]
 		return [dmu, dsigma2]
 
 	def jacob(self, t,y):
-		return np.array([[-self.gamma_b + 0.5*self.gamma_p**2, 0], [2*self.gamma_p**2*y[0]+2*self.epsilon*self.gamma_p*self.alpha_p*self.get_u(t,y[0]), -4*(self.gamma_b-self.gamma_p**2)*np.sqrt(y[1]) ] ])
+		return np.array([[-self.gamma_b + self.gamma_p**2, 0], [2*self.gamma_p**2*y[0]+2*self.epsilon*self.gamma_p*self.alpha_p*self.get_u(t,y[0]), -4*(self.gamma_b-self.gamma_p**2)*np.sqrt(y[1]) ] ])
 
 	def caputoEuler(self, a, f, y0, tspan):
 		"""Use one-step Adams-Bashforth (Euler) method to integrate Caputo equation
@@ -283,18 +295,36 @@ class CAEP:
 	def Solve(self, fraction=1):
 		self.fraction = fraction
 		self.t_evaluation = np.linspace(0, self.tfinal, self.eval_point)
-		y0 = [self.mu_ini, self.sigma2_ini]
+		telegraph = False
+		if telegraph:
+			self.mass = 2e-8
+			y0 = [self.mu_ini, 0, self.sigma2_ini, 0]
+		else:
+			y0 = [self.mu_ini, self.sigma2_ini]
 		# fractional model
 		if fraction!=1:
-			self.sol_n     = self.caputoEuler(fraction, self.dmu_sigma2, y0, self.t_evaluation)
-			self.times_n   = self.t_evaluation
-			self.mus_n     = self.sol_n[:,0]
-			self.sigma2s_n = self.sol_n[:,1]
+			if telegraph:
+				self.sol_n     = self.caputoEuler(fraction, self.telegrapher, y0, self.t_evaluation)
+				self.times_n   = self.t_evaluation
+				self.mus_n     = self.sol_n[:,0]
+				self.sigma2s_n = self.sol_n[:,2]
+			else:
+				self.sol_n     = self.caputoEuler(fraction, self.dmu_sigma2, y0, self.t_evaluation)
+				self.times_n   = self.t_evaluation
+				self.mus_n     = self.sol_n[:,0]
+				self.sigma2s_n = self.sol_n[:,1]
 		# exponential model
-		self.sol     = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob, max_step=self.maxstep, t_eval=self.t_evaluation) 
-		self.times   = self.sol.t
-		self.mus     = self.sol.y[0]
-		self.sigma2s = self.sol.y[1]
+		if telegraph:
+			self.sol     = solve_ivp(self.telegrapher, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob_teleg, max_step=self.maxstep, t_eval=self.t_evaluation) 
+			self.times   = self.sol.t
+			self.mus     = self.sol.y[0]
+			self.sigma2s = self.sol.y[2]
+		else:
+			self.sol     = solve_ivp(self.dmu_sigma2, [0, self.tfinal], y0, method='LSODA', rtol=1e-15, jac=self.jacob, max_step=self.maxstep, t_eval=self.t_evaluation) 
+			self.times   = self.sol.t
+			self.mus     = self.sol.y[0]
+			self.sigma2s = self.sol.y[1]
+		
 		self.Es = np.array([self.get_pulse(t) for t in self.times])
 		
 		if self.test==4:
@@ -458,7 +488,7 @@ class CAEP:
 
 		fig, ax = plt.subplots(2, figsize=(7,7))
 		ax[0].plot(1e6*times, Es/40.0, linewidth=2, color='b', linestyle='-.', label=r'$\rm E_{ext}/40\ [kV/m]$')
-		ax[0].plot(1e6*times, sigma_bar_per_sigma_e_t, linewidth=2, color='r', linestyle=':', label=r'$\rm  \bar{\sigma}(t)/\sigma_e$')
+		ax[0].plot(1e6*times, sigma_bar_per_sigma_e_t, linewidth=2, color='r', linestyle='--', label=r'$\rm  \bar{\sigma}(t)/\sigma_e$')
 		ax[0].plot(1e6*times, Resistance/1000.0, linewidth=2, color='k', linestyle='-', label=r'$\rm R(t)\ [k\Omega]$')
 		ymin0 = np.min([np.min(Es/40.0), np.min(sigma_bar_per_sigma_e_t), np.min(Resistance/1000)])
 		ymax0 = np.max([np.max(Es/40.0), np.max(sigma_bar_per_sigma_e_t), np.max(Resistance/1000)])
@@ -467,8 +497,9 @@ class CAEP:
 		else:
 			ax[0].set_ylim([1.1*ymin0, 1.1*ymax0])
 		ax[1].plot(1e6*times, s_t, linewidth=2, color='b', linestyle='-.', label=r'$\rm s(t)\ [A/mm^2]$')
-		ax[1].plot(1e6*times, mus, linewidth=2, color='g', linestyle='--', label=r'$\rm p(t)\ [A/mm^2]$')
-		ax[1].plot(1e6*times, var_p*10, linewidth=2, color='r', linestyle=':', label=r'$\rm var(p)(t)\times 10\ [A^2/mm^4]$')
+		# ax[1].plot(1e6*times, s_t*1e2, linewidth=2, color='b', linestyle='-.', label=r'$\rm s(t)\times 10^2\ [A/mm^2]$')
+		ax[1].plot(1e6*times, mus, linewidth=2, color='r', linestyle='--', label=r'$\rm p(t)\ [A/mm^2]$')
+		# ax[1].plot(1e6*times, var_p*1e3, linewidth=2, color='r', linestyle=':', label=r'$\rm var(p)(t)\times 10^3\ [A^2/mm^4]$')
 		ax[1].plot(1e6*times, J_t*area, linewidth=2, color='k', linestyle='-', label=r'$\rm I(t)\ [A]$')
 		ymin1 = np.min([np.min(s_t), np.min(mus), np.min(var_p*10), np.min(J_t*area)])
 		ymax1 = np.max([np.max(s_t), np.max(mus), np.max(var_p*10), np.max(J_t*area)])
@@ -480,8 +511,8 @@ class CAEP:
 		ax[1].set_xlabel(r'$\rm time\ [\mu s]$', fontsize=25)
 		ax[0].set_ylabel(r'$\rm value$', fontsize=25)
 		ax[1].set_ylabel(r'$\rm value$', fontsize=25)
-		ax[0].legend(fontsize=12, frameon=False)
-		ax[1].legend(fontsize=12, frameon=False)
+		ax[0].legend(fontsize=15, frameon=False)
+		ax[1].legend(fontsize=15, frameon=False)
 		plt.tight_layout()
 		plt.show()
 
@@ -882,8 +913,8 @@ class CAEP:
 
 		
 
-testnum    =  5           # 6: smoothed step function, 5: Gaussian, 4: sharp step pulse, 3: relaxation test
-case       =  3           # if testnum=5, then case=1, 2, 3, 4
+testnum    =  4           # 6: smoothed step function, 5: Gaussian, 4: sharp step pulse, 3: relaxation test
+case       =  1           # if testnum=5, then case=1, 2, 3, 4
       
 xmin       = -5.0
 xmax       =  5.0
@@ -930,7 +961,7 @@ else:
 eps        =  0.982 
 sep        =  CAEP(eps, sigma_e, sigma_c, SL, xmin, xmax, testnum, tf, max_t_step, t_samples, nx, phi)
 
-# sep.Solve()
+sep.Solve(1.01)
 # sep.statistics()
 # sep.time_domain_analysis()
 # sep.fourier_analysis()
