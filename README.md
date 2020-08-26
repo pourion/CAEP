@@ -6,7 +6,7 @@ by Pouria Mistani, Samira Pakravan and Frederic Gibou
 
 ----------------------------------------------------------------------------------
 
-* Dependencies: h5py, astroML, scipy, numpy, matplotlib
+* Dependencies: h5py, astroML, scipy, numpy, matplotlib, LaTex
 
 ----------------------------------------------------------------------------------
 

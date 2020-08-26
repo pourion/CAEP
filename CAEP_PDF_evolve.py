@@ -66,13 +66,13 @@ class CAEP:
 			self.omega   = 2.0*np.pi*1e6
 		else:
 			self.load_simulation_data()
-			self.alpha_b = np.median(self.sim_alphas)
-			self.gamma_b = np.median(self.sim_gammas)*1.01
+			self.alpha_b = 20970144.585071214 #np.median(self.sim_alphas)
+			self.gamma_b = 14125258.161788981 #np.median(self.sim_gammas)*1.01
 			self.R       = 3*self.sigma_e*self.sigma_c/(self.alpha_b*self.Cm*self.sigma_t) 
 			self.eta     = 1 + self.SL*self.sigma_t*self.R/((2 + self.phi)*self.sigma_e*self.sigma_c)
 			self.tau     = self.Cm*self.sigma_t*self.R/((2 + self.phi)*self.sigma_e*self.sigma_c)
 			self.omega   = 0.0
-			
+		# pdb.set_trace()
 		# experiments
 		self.nu_exp    =  7.246803016058461
 		self.cc_exp    =  0.8884126275039926
