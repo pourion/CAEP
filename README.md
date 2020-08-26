@@ -1,5 +1,10 @@
 # CAEP
-The stochastic theory for interfacial polarization of cell aggregates
+Source code for,
+
+"A fractional stochastic theory for interfacial polarization of cell aggregates"
+by Pouria Mistani, Samira Pakravan and Frederic Gibou
+
+
 
 Files: 
 $ python CAEP_PDF_evolve.py
