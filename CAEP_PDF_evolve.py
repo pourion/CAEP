@@ -1,23 +1,31 @@
 ################################
 # Cell Aggregate ElectroPoration (CAEP) library
-# Author: Poutia Akbari Mistani
+# Author: Pouria Akbari Mistani
 # Date: May 4, 2020
-# Reference: "On the stochastic electrodynamics of cell aggregate electrodynamics and their anomalous electroporation"
+# Reference: "A fractional stochastic theory for interfacial polarization of cell aggregates"
+# by Pouria Mistani, Samira Pakravan, Frederic Gibou
 # email: p.a.mistani@gmail.com
 ###############################
+import h5py
 import numpy as np
 import pdb
 import matplotlib.pyplot as plt
+from astroML.plotting import setup_text_plots
+setup_text_plots(fontsize=15, usetex=True)
+
 from scipy.special import gamma
 import scipy.integrate as integrate
 from scipy.integrate import solve_ivp
-from astroML.plotting import setup_text_plots
-setup_text_plots(fontsize=15, usetex=True)
 import scipy.fftpack
-import h5py
 from scipy import special
-#from pyfod.fod import caputo
+
+import sys
+sys.path.append('./utils')
 from mittag_leffler import ml
+
+
+
+
 
 def sigmoid(x):
   return 1 / (1 + np.exp(-x))
@@ -359,7 +367,7 @@ class CAEP:
 			ax[1].legend(fontsize=14, frameon=False)
 			plt.tight_layout()
 			plt.show()
-			# data_sim = np.loadtxt("data_time_mean_variance_ps.dat")
+			# data_sim = np.loadtxt("data/data_time_mean_variance_ps.dat")
 			# fig, ax = plt.subplots(1, 2, figsize=(15,7))
 			# ax[0].plot(1e6*self.times, -self.mus, 'r', linestyle='-', linewidth=2, label=r'$\rm p_z\ model$')
 			# ax[0].plot(data_sim[:,0], data_sim[:,1], color='g', linestyle=':', linewidth=1, label=r'$\rm p_x\ simulation$')
@@ -790,7 +798,7 @@ class CAEP:
 
 
 	def load_simulation_data(self, plot=False):
-		data = np.loadtxt("algam.dat")
+		data = np.loadtxt("data/algam.dat")
 		# self.sim_alphas  = data[:,0]
 		# self.sim_gammas  = data[:,1]
 		self.sim_radii   = data[:,2]/self.scaling
@@ -801,7 +809,7 @@ class CAEP:
 		self.sim_alphas = 3*self.sigma_e*self.sigma_c/(self.Cm*self.sim_radii*self.sigma_t)
 		self.sim_gammas = self.SL/self.Cm + self.sigma_c*self.sigma_e*(2+self.phi)/(self.Cm*self.sim_radii*self.sigma_t)
 
-		hf = h5py.File('data_pxyz.h5', 'r')
+		hf = h5py.File('data/data_pxyz.h5', 'r')
 		self.permitted = np.array(hf.get('permitted'))
 		self.sim_px = np.array(hf.get('px'))
 		self.sim_py = np.array(hf.get('py'))
