@@ -1,12 +1,17 @@
 # CAEP
-Source code for,
+* Source code for,
 
 "A fractional stochastic theory for interfacial polarization of cell aggregates"
 by Pouria Mistani, Samira Pakravan and Frederic Gibou
 
+----------------------------------------------------------------------------------
 
+* Dependencies: h5py, astroML, scipy, numpy, matplotlib
 
-Files: 
+----------------------------------------------------------------------------------
+
+* Files: 
+
 $ python CAEP_PDF_evolve.py
 This is the main file with the actual solvers for the reduced order Fokker-Planck equations. 
 There are 7 different test cases with different electric pulse profiles:
@@ -25,6 +30,7 @@ test_num = 5: The Gaussian pulse considered in the paper. For this test there ar
 
 test_num = 6: a smoothed step pulse, i.e. using a sigmoid function instead of a discontinuous step pulse.
 
+----------------------------------------------------------------------------------
 
 
 $ python FourierSpace.py
