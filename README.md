@@ -1,8 +1,7 @@
 
-# Reduced Order Model for Cell Aggregate Electro-Poration
+# Reduced order model for cell aggregate electroporation
 
-![me](https://github.com/pourion/CAEP/tree/master/results/sample.png)
-
+<img src="results/sample.png" width="800" />
 
 This is a library that implements my reduced order model for electric response of a cell aggregate. This was a mathematical modeling project in my PhD and you can find more details in the reference below.
 
@@ -45,8 +44,6 @@ workon <VIRTUAL_ENVIRONMENT_NAME>
 pip install -r requirements.txt
 ```
 
-The `requirements.txt` contains:
-`h5py, astroML, scipy, numpy, matplotlib, LaTex`
 
 
 # Usage Instructions: 
